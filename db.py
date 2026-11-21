@@ -59,15 +59,13 @@ def upsert_user(google_sub, email):
     if not google_sub or not email:
         raise ValueError("Validated Google subject and email are required")
     db = get_db()
-    existing = db.execute("SELECT id FROM users WHERE google_sub=?", (google_sub,)).fetchone()
-    if existing:
-        db.execute("UPDATE users SET email=? WHERE id=?", (email, existing["id"]))
-        db.commit()
-        return existing["id"]
-    user_id = uuid4().hex
-    db.execute("INSERT INTO users(id,google_sub,email) VALUES(?,?,?)", (user_id, google_sub, email))
-    db.commit()
-    return user_id
+    with db:
+        row = db.execute(
+            "INSERT INTO users(id,google_sub,email) VALUES(?,?,?) "
+            "ON CONFLICT(google_sub) DO UPDATE SET email=excluded.email RETURNING id",
+            (uuid4().hex, google_sub, email),
+        ).fetchone()
+    return row["id"]
 
 
 def _check_photo_owner(user_id, report):

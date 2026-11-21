@@ -12,7 +12,7 @@ This repository currently contains the **shared foundation**, not the finished a
 - Private validated photo storage.
 - Foundation tests.
 
-Google login, Gmail sending/replies, Gemini analysis/research, department routing and the student interface are **not connected yet**. `/health` explicitly reports the foundation stage. No test complaints should be sent to USF offices.
+The Google sign-in routes are ready for local OAuth configuration. Gmail sending and replies, Gemini analysis and research, department routing, and the student interface are pending. `/health` reports the foundation stage. Use a controlled inbox for email tests.
 
 ## First-time setup
 
@@ -31,6 +31,8 @@ Open http://localhost:5000/health. The root URL currently returns foundation inf
 On macOS/Linux use `.venv/bin/python` in place of `.\.venv\Scripts\python.exe`.
 
 `tools/init_local.py` creates a private `.env` with a random session secret and preserves an existing `.env`. Never commit that file. API credentials are not required for the foundation tests or health endpoint. Integration owners will configure them privately later.
+
+To test Google sign-in, configure a Google OAuth web client with the exact redirect URI `http://localhost:5000/auth/google/callback`. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `ALLOWED_GOOGLE_EMAILS` in `.env`. The last value is a comma-separated list of test account addresses. Restart the app and visit `http://localhost:5000/auth/google/start` using the same `localhost` origin as the callback. This requests identity and email scopes only. On success, the signed-in user's local ID is available as `session["user_id"]`. Use `POST /logout` with the session's CSRF token to sign out.
 
 SQLite and photos are created under ignored `instance/`. Each developer uses separate runtime data. Git transfers source code, not the team's live database. The integrated demo will run on one primary instance.
 
