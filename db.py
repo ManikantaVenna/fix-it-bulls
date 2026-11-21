@@ -33,11 +33,10 @@ def init_db():
             google_sub TEXT NOT NULL UNIQUE,
             email TEXT NOT NULL
         );
-        CREATE TABLE IF NOT EXISTS google_sign_in_attempts (
+        CREATE TABLE IF NOT EXISTS oauth_attempts (
             state TEXT PRIMARY KEY,
             browser_digest TEXT NOT NULL,
-            nonce TEXT NOT NULL,
-            code_verifier TEXT NOT NULL,
+            context_json TEXT NOT NULL,
             expires_at INTEGER NOT NULL
         );
         CREATE TABLE IF NOT EXISTS photos (
@@ -98,25 +97,24 @@ def init_db():
     """)
 
 
-def store_google_sign_in(state, browser_digest, nonce, code_verifier, *, now, expires_at):
+def store_oauth_attempt(state, browser_digest, context, *, now, expires_at):
     db = get_db()
     with db:
-        db.execute("DELETE FROM google_sign_in_attempts WHERE expires_at <= ?", (now,))
+        db.execute("DELETE FROM oauth_attempts WHERE expires_at <= ?", (now,))
         db.execute(
-            "INSERT INTO google_sign_in_attempts(state,browser_digest,nonce,code_verifier,expires_at) "
-            "VALUES(?,?,?,?,?)",
-            (state, browser_digest, nonce, code_verifier, expires_at),
+            "INSERT INTO oauth_attempts(state,browser_digest,context_json,expires_at) VALUES(?,?,?,?)",
+            (state, browser_digest, json.dumps(context), expires_at),
         )
 
 
-def consume_google_sign_in(state, browser_digest, *, now):
+def consume_oauth_attempt(state, browser_digest, *, now):
     db = get_db()
     with db:
-        return db.execute(
-            "DELETE FROM google_sign_in_attempts WHERE state=? AND browser_digest=? AND expires_at>? "
-            "RETURNING state, nonce, code_verifier",
+        row = db.execute(
+            "DELETE FROM oauth_attempts WHERE state=? AND browser_digest=? AND expires_at>? RETURNING context_json",
             (state, browser_digest, now),
         ).fetchone()
+    return json.loads(row["context_json"]) if row else None
 
 
 def upsert_user(google_sub, email):

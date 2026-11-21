@@ -13,11 +13,11 @@ from google_auth_oauthlib.flow import Flow
 from oauthlib.oauth2 import OAuth2Error
 from requests import RequestException
 
-from db import consume_google_sign_in, store_google_sign_in, upsert_user
+from db import consume_oauth_attempt, store_oauth_attempt, upsert_user
 
 bp = Blueprint("auth", __name__)
 IDENTITY_SCOPES = ("openid", "https://www.googleapis.com/auth/userinfo.email")
-SIGN_IN_TTL = 600
+OAUTH_ATTEMPT_TTL = 600
 
 
 def oauth_problem(title, message, status, *, retry_endpoint="auth.start", retry_label="Try Google sign-in again"):
@@ -55,6 +55,48 @@ def _exchange_identity(code, pending):
     )
 
 
+def _browser_digest(endpoint, browser_key, binding):
+    return hashlib.sha256(f"{endpoint}:{browser_key}:{binding}".encode()).hexdigest()
+
+
+def begin_oauth(flow, callback_endpoint, *, context=None, binding="", redirect_code=302, **options):
+    nonce = secrets.token_urlsafe(32)
+    state = secrets.token_urlsafe(32)
+    browser_key = secrets.token_urlsafe(32)
+    now = int(time.time())
+    location, _ = flow.authorization_url(state=state, nonce=nonce, **options)
+    store_oauth_attempt(
+        state, _browser_digest(callback_endpoint, browser_key, binding),
+        {**(context or {}), "state": state, "nonce": nonce, "code_verifier": flow.code_verifier},
+        now=now, expires_at=now + OAUTH_ATTEMPT_TTL,
+    )
+    response = redirect(location, code=redirect_code)
+    response.set_cookie(
+        f"fib_oauth_{state}", browser_key, max_age=OAUTH_ATTEMPT_TTL, httponly=True, samesite="Lax",
+        secure=current_app.config["SESSION_COOKIE_SECURE"], path=url_for(callback_endpoint),
+    )
+    return response
+
+
+def take_oauth_attempt(callback_endpoint, *, binding=""):
+    incoming_state = request.args.get("state", "")
+    cookie_name = f"fib_oauth_{incoming_state}" if re.fullmatch(r"[A-Za-z0-9_-]{43}", incoming_state) else None
+    browser_key = request.cookies.get(cookie_name) if cookie_name else None
+    pending = consume_oauth_attempt(
+        incoming_state, _browser_digest(callback_endpoint, browser_key, binding), now=int(time.time()),
+    ) if browser_key else None
+    return pending, cookie_name if browser_key else None
+
+
+def clear_oauth_cookie(response, callback_endpoint, cookie_name):
+    if cookie_name:
+        response.delete_cookie(
+            cookie_name, path=url_for(callback_endpoint), httponly=True, samesite="Lax",
+            secure=current_app.config["SESSION_COOKIE_SECURE"],
+        )
+    return response
+
+
 @bp.get("/auth/google/start")
 def start():
     config = current_app.config
@@ -66,32 +108,12 @@ def start():
             "Ask the project owner to check the test site's Google sign-in setup.",
             503,
         )
-    nonce = secrets.token_urlsafe(32)
-    state = secrets.token_urlsafe(32)
-    browser_key = secrets.token_urlsafe(32)
-    now = int(time.time())
-    flow = _flow()
-    location, _ = flow.authorization_url(state=state, nonce=nonce, access_type="online", prompt="select_account")
-    store_google_sign_in(
-        state, hashlib.sha256(browser_key.encode()).hexdigest(), nonce, flow.code_verifier,
-        now=now, expires_at=now + SIGN_IN_TTL,
-    )
-    response = redirect(location)
-    response.set_cookie(
-        f"fib_sign_in_{state}", browser_key, max_age=SIGN_IN_TTL, httponly=True, samesite="Lax",
-        secure=config["SESSION_COOKIE_SECURE"], path=url_for("auth.callback"),
-    )
-    return response
+    return begin_oauth(_flow(), "auth.callback", access_type="online", prompt="select_account")
 
 
 @bp.get("/auth/google/callback")
 def callback():
-    incoming_state = request.args.get("state", "")
-    cookie_name = f"fib_sign_in_{incoming_state}" if re.fullmatch(r"[A-Za-z0-9_-]{43}", incoming_state) else None
-    browser_key = request.cookies.get(cookie_name) if cookie_name else None
-    pending = consume_google_sign_in(
-        incoming_state, hashlib.sha256(browser_key.encode()).hexdigest(), now=int(time.time()),
-    ) if browser_key else None
+    pending, cookie_name = take_oauth_attempt("auth.callback")
     if pending is None:
         response = oauth_problem(
             "This sign-in link has expired",
@@ -100,12 +122,7 @@ def callback():
         )
     else:
         response = _finish_sign_in(pending)
-    if browser_key:
-        response.delete_cookie(
-            cookie_name, path=url_for("auth.callback"), httponly=True, samesite="Lax",
-            secure=current_app.config["SESSION_COOKIE_SECURE"],
-        )
-    return response
+    return clear_oauth_cookie(response, "auth.callback", cookie_name)
 
 
 def _finish_sign_in(pending):
@@ -138,6 +155,7 @@ def _finish_sign_in(pending):
     user_id = upsert_user(subject, email.strip())
     session.clear()
     session["user_id"] = user_id
+    session["gmail_consent_key"] = secrets.token_urlsafe(32)
     return redirect(url_for("index"), code=303)
 
 

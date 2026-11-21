@@ -72,6 +72,38 @@ def test_connection_separates_gmail_scopes_and_checks_returned_subject(setup, mo
     assert client.get("/gmail/status").json["connected"] is False
 
 
+def test_gmail_attempts_survive_overlap_but_not_disconnect(setup, monkeypatch):
+    from routes import gmail
+
+    app, owner, _, _ = setup
+    client = app.test_client()
+    with client.session_transaction() as state:
+        state["user_id"] = owner
+    headers = {"X-CSRFToken": client.get("/api/csrf").json["csrf_token"]}
+    monkeypatch.setattr(gmail, "exchange_consent", lambda code, pending: ("owner-sub", "test-refresh-token"))
+
+    def start_consent():
+        response = client.post("/gmail/connect", headers=headers)
+        assert response.status_code == 303
+        return parse_qs(urlparse(response.location).query)["state"][0]
+
+    def finish_consent(state):
+        return client.get("/gmail/callback", query_string={"code": "fixture", "state": state})
+
+    first, second = start_consent(), start_consent()
+    assert finish_consent(first).status_code == 303
+    assert finish_consent(second).status_code == 303
+    replay = finish_consent(first)
+    assert replay.status_code == 400
+    assert "Back to Account" in replay.text
+
+    abandoned = start_consent()
+    client.post("/gmail/disconnect", headers=headers)
+    start_consent()
+    assert finish_consent(abandoned).status_code == 400
+    assert client.get("/gmail/status").json["connected"] is False
+
+
 def test_mailbox_credentials_are_encrypted_and_owner_scoped(setup):
     app, owner, stranger, report = setup
     with app.app_context():
