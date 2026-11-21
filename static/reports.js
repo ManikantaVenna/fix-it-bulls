@@ -4,7 +4,34 @@ if (photoInput) {
   const preview = document.querySelector("#preview");
   const image = document.querySelector("#preview-image");
   const remove = document.querySelector("#remove-photo");
+  const cameraInput = document.querySelector("#camera-file");
+  const openCamera = document.querySelector("#open-camera");
+  const cameraPanel = document.querySelector("#camera-panel");
+  const video = document.querySelector("#camera-video");
+  const capture = document.querySelector("#capture-photo");
+  const closeCamera = document.querySelector("#cancel-camera");
+  const cameraStatus = document.querySelector("#camera-status");
   let previewUrl;
+  let stream;
+  let cameraSession = 0;
+
+  openCamera.hidden = false;
+
+  function showCameraStatus(message) {
+    cameraStatus.textContent = message;
+    cameraStatus.hidden = !message;
+  }
+
+  function stopCamera() {
+    cameraSession += 1;
+    stream?.getTracks().forEach(track => track.stop());
+    stream = undefined;
+    video.srcObject = null;
+    cameraPanel.hidden = true;
+    openCamera.disabled = false;
+    openCamera.setAttribute("aria-expanded", "false");
+    capture.disabled = true;
+  }
 
   function clearPreview() {
     if (previewUrl) {
@@ -15,24 +42,109 @@ if (photoInput) {
     preview.hidden = true;
   }
 
-  photoInput.addEventListener("change", () => {
-    clearPreview();
-    photoInput.setCustomValidity("");
-    const file = photoInput.files[0];
+  function previewPhoto(input) {
+    const file = input.files[0];
     if (!file) return;
+    stopCamera();
+    showCameraStatus("");
+    clearPreview();
+    (input === photoInput ? cameraInput : photoInput).value = "";
+    photoInput.setCustomValidity("");
     if (file.size > 5 * 1024 * 1024) {
       photoInput.setCustomValidity("Choose a photo of 5 MB or less.");
       photoInput.reportValidity();
+      showCameraStatus("Choose a photo of 5 MB or less.");
       return;
     }
     previewUrl = URL.createObjectURL(file);
     image.src = previewUrl;
     preview.hidden = false;
+  }
+
+  photoInput.addEventListener("change", () => {
+    if (photoInput.files.length) {
+      previewPhoto(photoInput);
+    } else if (!cameraInput.files.length) {
+      clearPreview();
+      photoInput.setCustomValidity("");
+      showCameraStatus("");
+    }
   });
+  cameraInput.addEventListener("change", () => previewPhoto(cameraInput));
+
+  openCamera.addEventListener("click", async () => {
+    showCameraStatus("");
+    if (!navigator.mediaDevices?.getUserMedia || typeof DataTransfer !== "function") {
+      cameraInput.click();
+      return;
+    }
+    const session = ++cameraSession;
+    cameraPanel.hidden = false;
+    openCamera.setAttribute("aria-expanded", "true");
+    openCamera.disabled = true;
+    closeCamera.focus();
+    showCameraStatus("Starting the camera…");
+    try {
+      const feed = await navigator.mediaDevices.getUserMedia({
+        audio: false, video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 } },
+      });
+      if (session !== cameraSession) {
+        feed.getTracks().forEach(track => track.stop());
+        return;
+      }
+      stream = feed;
+      video.srcObject = feed;
+      await video.play();
+      if (session === cameraSession) {
+        capture.disabled = false;
+        showCameraStatus("");
+      }
+    } catch {
+      if (session !== cameraSession) return;
+      stopCamera();
+      showCameraStatus("Camera unavailable. You can upload a photo instead.");
+      openCamera.focus();
+    }
+  });
+
+  capture.addEventListener("click", () => {
+    if (!stream || !video.videoWidth || !video.videoHeight) return;
+    capture.disabled = true;
+    const session = cameraSession;
+    const scale = Math.min(1, 1920 / Math.max(video.videoWidth, video.videoHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+    canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+    canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(blob => {
+      if (session !== cameraSession) return;
+      if (!blob) {
+        capture.disabled = false;
+        showCameraStatus("Could not capture the photo. Try again or upload a photo.");
+        return;
+      }
+      const selection = new DataTransfer();
+      selection.items.add(new File([blob], "camera-photo.jpg", { type: "image/jpeg" }));
+      photoInput.files = selection.files;
+      previewPhoto(photoInput);
+      showCameraStatus("Photo captured.");
+      remove.focus();
+    }, "image/jpeg", 0.86);
+  });
+
+  closeCamera.addEventListener("click", () => {
+    stopCamera();
+    showCameraStatus("");
+    openCamera.focus();
+  });
+  photoInput.form.addEventListener("submit", stopCamera);
+  window.addEventListener("pagehide", stopCamera);
 
   remove.addEventListener("click", () => {
     photoInput.value = "";
+    cameraInput.value = "";
     photoInput.setCustomValidity("");
+    showCameraStatus("");
     clearPreview();
     photoInput.focus();
   });

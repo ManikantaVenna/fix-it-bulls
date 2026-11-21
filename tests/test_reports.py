@@ -5,6 +5,7 @@ from io import BytesIO
 import pytest
 from cryptography.fernet import Fernet
 from PIL import Image
+from werkzeug.datastructures import MultiDict
 
 from app import create_app
 from db import get_report, upsert_user
@@ -69,6 +70,25 @@ def test_capture_review_and_private_photo(reporting_app):
     sign_in(client, other)
     assert client.get(result.location).status_code == 404
     assert client.get(photo_url).status_code == 404
+
+
+def test_report_form_offers_camera_and_upload_and_rejects_two_photos(reporting_app):
+    app, owner, _ = reporting_app
+    client = app.test_client()
+    sign_in(client, owner)
+    page = client.get("/reports/new").text
+    assert 'id="open-camera"' in page
+    assert 'id="photo"' in page
+    assert 'capture="environment"' in page
+
+    image = BytesIO()
+    Image.new("RGB", (24, 24)).save(image, format="JPEG")
+    fields = MultiDict(report_fields(client))
+    fields.add("photo", (BytesIO(image.getvalue()), "upload.jpg"))
+    fields.add("photo", (BytesIO(image.getvalue()), "camera.jpg"))
+    result = client.post("/reports/new", data=fields)
+    assert result.status_code == 422
+    assert "Choose one photo." in result.text
 
 
 def test_requires_real_authentication_and_csrf(reporting_app):

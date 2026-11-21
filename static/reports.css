@@ -54,6 +54,11 @@ textarea { resize: vertical; }
 .preview { margin-top: .75rem; }
 .preview img, .evidence img { display: block; max-width: 100%; max-height: 19rem; height: auto; width: auto; border-radius: .5rem; }
 .preview .button { margin-top: .65rem; }
+.photo-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .65rem; }
+.photo-actions > input[type="file"] { flex: 1 1 15rem; min-width: 0; }
+.camera-panel { margin-top: .75rem; }
+.camera-panel video { display: block; width: min(100%, 27rem); border-radius: .5rem; background: var(--ink); }
+.camera-panel .photo-actions { margin-top: .65rem; }
 .evidence dl { margin-block: 1rem; }
 .evidence dt { font-weight: 650; }
 .evidence dd { margin: 0 0 .75rem; white-space: pre-wrap; overflow-wrap: anywhere; }

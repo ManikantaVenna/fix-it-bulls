@@ -70,10 +70,23 @@
       </div>
     </fieldset>
     <div class="field photo-field">
-      <label for="photo">Add a photo <span>Optional</span></label>
+      <label for="photo">Upload photo <span>Optional</span></label>
       <p class="hint" id="photo-help">One JPEG, PNG, or WebP image, up to 5 MB.</p>
-      <input type="file" name="photo" id="photo" accept="image/jpeg,image/png,image/webp"{{ attributes('photo', 'photo-help') }}>
+      <div class="photo-actions">
+        <input type="file" name="photo" id="photo" accept="image/jpeg,image/png,image/webp"{{ attributes('photo', 'photo-help') }}>
+        <button class="button secondary" type="button" id="open-camera" aria-controls="camera-panel"
+                aria-expanded="false" hidden>Take photo</button>
+      </div>
+      <input type="file" name="photo" id="camera-file" accept="image/*" capture="environment" hidden>
+      <p class="hint" id="camera-status" role="status" hidden></p>
       {{ field_error('photo') }}
+      <div class="camera-panel" id="camera-panel" hidden>
+        <video id="camera-video" aria-label="Live camera preview" autoplay muted playsinline></video>
+        <div class="photo-actions">
+          <button class="button primary" type="button" id="capture-photo" disabled>Capture photo</button>
+          <button class="button secondary" type="button" id="cancel-camera">Close camera</button>
+        </div>
+      </div>
       <div class="preview" id="preview" hidden>
         <img id="preview-image" alt="Preview of the selected photo">
         <button class="button secondary" type="button" id="remove-photo">Remove photo</button>
