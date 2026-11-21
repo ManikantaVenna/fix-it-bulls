@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#f7f4e9">
   <title>{% block title %}Fix It Bulls{% endblock %}</title>
+  <link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', filename='master-tradesman.png') }}">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Manrope:wght@400;500;600;700;800&amp;display=swap">
   <link rel="stylesheet" href="{{ url_for('static', filename='reports.css') }}">
   <script src="{{ url_for('static', filename='reports.js') }}" defer></script>
@@ -17,7 +18,7 @@
   <header class="site-header">
     <div class="site-header-inner">
       <a class="brand" href="{{ url_for('reports.dashboard') }}">
-        <span class="brand-mark" aria-hidden="true">FB</span>
+        <img class="brand-mark" src="{{ url_for('static', filename='master-tradesman.png') }}" width="44" height="44" alt="">
         <span>Fix It Bulls</span>
       </a>
       <nav class="desktop-nav" aria-label="Main navigation">
