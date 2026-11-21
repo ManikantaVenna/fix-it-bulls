@@ -139,3 +139,27 @@ def test_research_uses_search_and_url_context_tools():
     tools = client.calls[0]["config"].tools
     assert any(t.google_search is not None for t in tools)
     assert any(t.url_context is not None for t in tools)
+
+
+# --- expiry and safe display ---
+from datetime import datetime, timedelta, timezone
+
+from schemas import ResearchResult
+from services.research import display_sources, is_expired
+
+
+def test_research_expires():
+    fresh = ResearchResult(status="no_result", consulted_at=datetime.now(timezone.utc))
+    old = ResearchResult(status="no_result", consulted_at=datetime.now(timezone.utc) - timedelta(hours=2))
+    assert not is_expired(fresh)
+    assert is_expired(old)
+    assert is_expired(ResearchResult(status="no_result"))
+
+
+def test_display_sources_is_plain_data():
+    resp = response(urls=[("https://www.usf.edu/parking/bull-runner/", "URL_RETRIEVAL_STATUS_SUCCESS")])
+    out = display_sources(research_channel(report(), client=FakeClient(resp)))
+    assert out["links"][0] == {"url": "https://www.usf.edu/parking/bull-runner/", "label": "www.usf.edu"}
+    assert out["links"][1]["label"] == "Google Search result (usf.edu)"  # redirect link
+    assert out["widget_html"] == "<div>search</div>"
+    assert out["consulted_at"]

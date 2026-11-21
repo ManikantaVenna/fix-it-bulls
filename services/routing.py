@@ -12,7 +12,7 @@ from datetime import date, datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 
-from schemas import ReportInput, RoutingOutput
+from schemas import AnalysisOutput, ReportInput, RoutingOutput
 
 DIRECTORY_PATH = Path(__file__).resolve().parent.parent / "data" / "routing_directory.json"
 
@@ -164,3 +164,35 @@ def resolve_route(
         official_source=route["official_source"],
         checked_date=route["checked_date"],
     )
+
+
+def route_for_analysis(report: ReportInput, analysis: AnalysisOutput) -> RoutingOutput:
+    """Route using Gemini's suggested issue type, with urgent concerns and its
+    clarification questions taken into account.
+
+    If Gemini still has unanswered questions, the report isn't routed yet:
+    the UI shows the questions, stores the answers in
+    report.clarification_answers and calls analyze_report again.
+    """
+    if analysis.possible_urgent_concern:
+        return resolve_route(report, analysis.suggested_issue_type, urgent=True)
+    unanswered = [q for q in analysis.questions if q not in report.clarification_answers]
+    if unanswered and len(report.clarification_answers) < 2:
+        return RoutingOutput(
+            state="needs_details",
+            reason="Please answer the question(s) below so the report goes to the right place.",
+            missing_fields=unanswered,
+        )
+    return resolve_route(report, analysis.suggested_issue_type)
+
+
+def triage(report: ReportInput, photo_bytes: bytes | None, *, client=None) -> tuple[AnalysisOutput, RoutingOutput]:
+    """One call for the report screen: Gemini analysis, then the verified route.
+
+    Raises services.ai.AIUnavailableError if Gemini fails; keep the student's
+    input and let them pick the issue type by hand, then call resolve_route.
+    """
+    from services.ai import analyze_report
+
+    analysis = analyze_report(report, photo_bytes, client=client)
+    return analysis, route_for_analysis(report, analysis)

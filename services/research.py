@@ -223,3 +223,37 @@ def research_channel(report: ReportInput, *, issue_type: str = "other", client=N
     if not finding.found_official_instructions:
         return result("insufficient_evidence", uncertainties=uncertainties or ["No clear reporting instructions found."], **common)
     return result("sourced_suggestion", uncertainties=uncertainties, **common)
+
+
+RESEARCH_MAX_AGE_MINUTES = 30
+
+
+def is_expired(result: ResearchResult, now: datetime | None = None) -> bool:
+    """Research is transient. Past this age (or after a reload that lost it),
+    show "Research result expired - check again" and keep the student's draft."""
+    if result.consulted_at is None:
+        return True
+    now = now or datetime.now(timezone.utc)
+    return (now - result.consulted_at).total_seconds() > RESEARCH_MAX_AGE_MINUTES * 60
+
+
+def display_sources(result: ResearchResult) -> dict:
+    """Safe data for the research card. Plain strings only: escape them in the template.
+
+    Google's Search suggestion widget (search_entry_point_html) is
+    provider-supplied HTML. Render it only inside a sandboxed iframe, e.g.
+    <iframe sandbox srcdoc="{{ widget_html }}"> with Jinja autoescaping on,
+    never with |safe. It is None when search wasn't used.
+    """
+    links = []
+    for url in result.supporting_source_links:
+        url = str(url)
+        host = urlparse(url).hostname or ""
+        links.append({"url": url, "label": host if _is_official(url) else "Google Search result (usf.edu)"})
+    meta = result.grounding_metadata or {}
+    return {
+        "links": links,
+        "search_queries": [str(q)[:200] for q in meta.get("web_search_queries", [])][:5],
+        "widget_html": meta.get("search_entry_point_html"),
+        "consulted_at": result.consulted_at.isoformat() if result.consulted_at else None,
+    }

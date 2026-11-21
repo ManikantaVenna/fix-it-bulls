@@ -131,3 +131,41 @@ def test_directory_entries_are_complete_and_cite_official_pages():
         assert (r["channel"] == "email") == bool(r["recipient"])
         assert set(r["issue_types"]) <= set(routing.PHYSICAL_TYPES | {"network_phone", "access_reader", "computer_av"})
     assert "911" in directory["urgent_guidance"]["message"]
+
+
+# --- route_for_analysis / triage ---
+from schemas import AnalysisOutput
+from services.routing import route_for_analysis
+
+
+def test_unanswered_questions_hold_routing():
+    analysis = AnalysisOutput(suggested_issue_type="computer_av", questions=["Does the power light turn on?"])
+    out = route_for_analysis(report(), analysis)
+    assert out.state == "needs_details"
+    assert out.missing_fields == ["Does the power light turn on?"]
+
+
+def test_answered_questions_allow_routing():
+    q = "Does the power light turn on?"
+    analysis = AnalysisOutput(suggested_issue_type="computer_av", questions=[q])
+    out = route_for_analysis(report(clarification_answers={q: "No light at all"}), analysis)
+    assert out.route_id == "usf_it_help"
+
+
+def test_urgent_analysis_wins_over_questions():
+    analysis = AnalysisOutput(suggested_issue_type="lighting", questions=["Which floor?"], possible_urgent_concern=True)
+    assert route_for_analysis(report(), analysis).state == "urgent_guidance"
+
+
+def test_triage_runs_analysis_then_route():
+    from types import SimpleNamespace
+    from services.ai import _GeminiAnalysis
+    from services.routing import triage
+
+    parsed = _GeminiAnalysis(observations=[], user_reported_facts=[], suggested_issue_type="plumbing",
+                             missing_fields=[], questions=[], proposed_title="Leak", proposed_body="Leak.",
+                             possible_urgent_concern=False, uncertainty_notes=[])
+    client = SimpleNamespace(models=SimpleNamespace(generate_content=lambda **k: SimpleNamespace(parsed=parsed, text="")))
+    analysis, route = triage(report(), None, client=client)
+    assert analysis.suggested_issue_type == "plumbing"
+    assert route.route_id == "usf_facilities_service_center"
