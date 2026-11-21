@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, ValidationError
 
 from schemas import ReportInput, ResearchResult
-from services.ai import AIUnavailableError, generate, get_client, http_options, model_name
+from services.ai import AIUnavailableError, generate, get_client, http_options, is_retryable, model_name
 
 OFFICIAL_DOMAIN = "usf.edu"
 SUCCESS = "URL_RETRIEVAL_STATUS_SUCCESS"
@@ -161,9 +161,9 @@ def research_channel(report: ReportInput, *, issue_type: str = "other", client=N
 
         client = client or get_client()
 
-        def ask(prompt, tools, models=None):
+        def ask(prompt, tools, models=None, quick_timeout_ms=15_000):
             config = types.GenerateContentConfig(tools=tools, temperature=0.2, http_options=http_options(60_000))
-            return generate(client, prompt, config, models=models)
+            return generate(client, prompt, config, models=models, quick_timeout_ms=quick_timeout_ms)
 
         try:
             # Quota errors apply to the whole key, so web search tries one model only.
@@ -172,11 +172,16 @@ def research_channel(report: ReportInput, *, issue_type: str = "other", client=N
                 types.Tool(url_context=types.UrlContext()),
             ], models=[model_name()])
         except Exception as exc:
-            if getattr(exc, "code", None) != 429:
+            if not is_retryable(exc):
                 raise
-            # Web search has no quota: read known official pages instead.
+            # Web search has no quota, is busy or timed out: read known official pages instead.
             pages = seed_pages(issue_type)
-            response = ask(_prompt(context, pages), [types.Tool(url_context=types.UrlContext())])
+            # Reading pages takes longer than a plain answer (about 10-60s live), so
+            # each model gets 45s and only the two fastest models are tried.
+            response = ask(
+                _prompt(context, pages), [types.Tool(url_context=types.UrlContext())],
+                models=list(dict.fromkeys([model_name(), "gemini-3.6-flash"])), quick_timeout_ms=45_000,
+            )
             notes.append(f"Web search was unavailable, so only {len(pages)} official USF page(s) were checked.")
     except AIUnavailableError:
         return result("provider_error", uncertainties=["Gemini research isn't configured."])

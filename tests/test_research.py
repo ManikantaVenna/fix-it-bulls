@@ -163,3 +163,21 @@ def test_display_sources_is_plain_data():
     assert out["links"][1]["label"] == "Google Search result (usf.edu)"  # redirect link
     assert out["widget_html"] == "<div>search</div>"
     assert out["consulted_at"]
+
+
+class ReadTimeout(Exception):
+    pass
+
+
+class SearchTimeoutClient(FakeClient):
+    def generate_content(self, **kwargs):
+        self.calls.append(kwargs)
+        if any(t.google_search is not None for t in kwargs["config"].tools):
+            raise ReadTimeout("search took too long")
+        return self.resp
+
+
+def test_search_timeout_falls_back_to_official_pages():
+    resp = response(chunks=(), urls=[("https://www.usf.edu/parking/", "URL_RETRIEVAL_STATUS_SUCCESS")])
+    out = research_channel(report(), issue_type="parking_transport", client=SearchTimeoutClient(resp))
+    assert out.status == "sourced_suggestion"
