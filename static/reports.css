@@ -39,7 +39,12 @@ svg { display: inline-block; flex: none; vertical-align: middle; }
 .site-header-inner, .page { width: min(72rem, 100% - 3rem); margin-inline: auto; }
 .site-header-inner { min-height: 4.25rem; display: flex; align-items: center; gap: clamp(.85rem, 3vw, 2rem); justify-content: space-between; }
 .brand { display: inline-flex; min-height: 44px; align-items: center; gap: .5rem; font-size: 1.25rem; font-weight: 800; text-decoration: none; color: var(--ink); white-space: nowrap; letter-spacing: -.035em; }
-.brand svg { color: var(--white); background: var(--brand-dark); padding: .3rem; border-radius: .5rem; }
+.brand-mark {
+  display: inline-grid; flex: none; place-items: center;
+  width: 2.15rem; height: 2.15rem; border-radius: .5rem; border: 1px solid var(--brand-dark);
+  color: #f8edbf; background: var(--brand-dark);
+  font-size: .91rem; line-height: 1; font-weight: 800; letter-spacing: -.035em;
+}
 .desktop-nav { display: flex; align-items: center; gap: clamp(.2rem, 1.4vw, .7rem); margin-right: auto; }
 .desktop-nav a, .account-link { display: inline-flex; align-items: center; min-height: 44px; padding: .24rem .2rem; color: inherit; font-size: .89rem; font-weight: 650; }
 .desktop-nav a { text-decoration: none; border-radius: .5rem; padding-inline: .65rem; }
@@ -177,7 +182,7 @@ summary { display: list-item; min-height: 44px; padding: .58rem .08rem; cursor: 
   .site-header-inner, .page { width: calc(100% - 2rem); }
   .site-header-inner { min-height: 3.5rem; }
   .brand { font-size: 1.14rem; }
-  .brand svg { width: 28px; height: 28px; }
+  .brand-mark { width: 1.9rem; height: 1.9rem; font-size: .8rem; }
   .desktop-nav { display: none; }
   .mobile-nav {
     position: fixed; inset: auto 0 0; z-index: 5; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));

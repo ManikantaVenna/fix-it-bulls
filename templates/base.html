@@ -16,7 +16,10 @@
   <a class="skip-link" href="#main">Skip to content</a>
   <header class="site-header">
     <div class="site-header-inner">
-      <a class="brand" href="{{ url_for('reports.dashboard') }}">{{ icon('bull', 34) }} <span>Fix It Bulls</span></a>
+      <a class="brand" href="{{ url_for('reports.dashboard') }}">
+        <span class="brand-mark" aria-hidden="true">FB</span>
+        <span>Fix It Bulls</span>
+      </a>
       <nav class="desktop-nav" aria-label="Main navigation">
         <a href="{{ url_for('reports.dashboard') }}"{% if active == 'home' %} aria-current="page"{% endif %}>Home</a>
         <a href="{{ url_for('reports.new') }}"{% if active == 'new' %} aria-current="page"{% endif %}>New Report</a>
