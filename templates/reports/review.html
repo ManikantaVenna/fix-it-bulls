@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Review your draft | Fix It Bulls{% endblock %}
+{% block content %}
+  <div class="page-heading">
+    <a class="back-link" href="{{ url_for('reports.new') }}">Start a new report</a>
+    <h1>Review your draft</h1>
+    <p>Your original report is saved. You can edit and download the text below.</p>
+  </div>
+  <div class="review-grid">
+    <section class="panel" aria-labelledby="draft">
+      <h2 id="draft">Report draft</h2>
+      <p class="hint">Edits are included in your download.</p>
+      <div class="field">
+        <label for="draft-subject">Subject</label>
+        <input id="draft-subject" maxlength="200" value="{{ subject }}">
+      </div>
+      <div class="field">
+        <label for="draft-body">Message</label>
+        <textarea id="draft-body" rows="10">{{ body }}</textarea>
+      </div>
+      <button type="button" class="button primary" id="download-draft" hidden>Download draft</button>
+    </section>
+    <aside class="panel evidence" aria-labelledby="evidence">
+      <h2 id="evidence">Original report</h2>
+      <dl>
+        <dt>Location</dt>
+        <dd>{{ report.building_or_area }}{% if report.room_floor_landmark %}<br>{{ report.room_floor_landmark }}{% endif %}</dd>
+        {% if report.asset_tag %}
+          <dt>Equipment label</dt>
+          <dd>{{ report.asset_tag }}</dd>
+        {% endif %}
+        <dt>Description</dt>
+        <dd>{{ report.description }}</dd>
+      </dl>
+      {% if report.photo_id %}
+        <img src="{{ url_for('reports.photo', report_id=report_id) }}" alt="Photo attached to the original report">
+      {% endif %}
+    </aside>
+  </div>
+{% endblock %}
