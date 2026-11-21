@@ -4,15 +4,7 @@ USF Tampa campus issue reporting with Gemini-assisted interpretation, hybrid rou
 
 ## Current status
 
-The Gmail feature branch adds separate mailbox consent, approved test email with an optional photo, and manual reply checks to the shared foundation:
-
-- Flask app factory, health endpoint and CSRF support.
-- Shared typed contracts in `schemas.py`.
-- SQLite helpers with report ownership, edit versioning and outbound-evidence protection.
-- Private validated photo storage.
-- Foundation tests.
-
-Gmail endpoints are covered by local tests using simulated provider responses. Live Google verification needs an OAuth client and test accounts. Report delivery also needs Hanif's verified routing module. The student interface is being built on Sasi's branch. `/health` reports the foundation stage.
+The demo branch combines the student report screens, Gemini analysis and source-backed USF routing, and the Gmail test workflow. Use a controlled inbox for each sending demonstration. The tests run with simulated Google and Gmail responses.
 
 ## First-time setup
 
@@ -26,7 +18,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m flask --app app:create_app run
 ```
 
-Open http://localhost:5000/health. The root URL currently returns foundation information; Sasi's interface will be integrated separately.
+Open http://localhost:5000/ and choose **Sign in with Google**. Then save a report and choose **Analyze with Gemini** or select an issue category.
 
 On macOS/Linux use `.venv/bin/python` in place of `.\.venv\Scripts\python.exe`.
 
@@ -34,13 +26,15 @@ On macOS/Linux use `.venv/bin/python` in place of `.\.venv\Scripts\python.exe`.
 
 To test Google sign-in, configure a Google OAuth web client with the exact redirect URI `http://localhost:5000/auth/google/callback`. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `ALLOWED_GOOGLE_EMAILS` in `.env`. The last value is a comma-separated list of test account addresses. Restart the app and visit `http://localhost:5000/auth/google/start` using the same `localhost` origin as the callback. This requests identity and email scopes only. On success, the signed-in user's local ID is available as `session["user_id"]`. Use `POST /logout` with the session's CSRF token to sign out.
 
+Set `GEMINI_API_KEY` in the private `.env` for photo analysis and source research. Use **Choose a category** if Gemini is unavailable and continue with the verified rules. The search request uses the campus, issue category and site type.
+
 ## Gmail test setup
 
 1. Enable the Gmail API for the same Google Cloud project. Add the personal Google account that will send the report to the project's OAuth test users and to `ALLOWED_GOOGLE_EMAILS` locally.
 2. Add `http://localhost:5000/gmail/callback` as a second redirect URI on the same OAuth web client. Use `localhost` for the whole flow.
 3. Generate a private `GMAIL_TOKEN_KEY` with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Save it in your local `.env`. Use the project's virtual environment Python.
 4. Set `TEST_RECIPIENT` to a single inbox the team controls. The preview shows the exact address and the app only delivers there in TEST mode.
-5. Restart Flask. Sign in, connect Gmail with the same account, review one test report, and send it when the verified routing module is present. Reply from the test inbox to the original message and use **Check for replies**. The app records the reply separately from any repair outcome.
+5. Restart Flask. Sign in, open an email-eligible report, and connect Gmail with the same account. Confirm the **Review test email** details before clicking **Send report**. Reply from the test inbox to the original message, then use **Check for replies** on that report. A reply changes the communication status to **Reply received**.
 
 If Gmail's send result is uncertain, inspect the sender's Sent folder using the reviewed subject. Keep that report locked while verifying delivery to avoid a duplicate. Disconnect removes the stored connection from Fix It Bulls. Google account settings manage the permission grant itself.
 

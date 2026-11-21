@@ -2,6 +2,7 @@
 
 import secrets
 import time
+from uuid import UUID
 
 from flask import Blueprint, current_app, jsonify, redirect, request, session, url_for
 from google.auth.exceptions import GoogleAuthError
@@ -93,6 +94,12 @@ def connect():
         "user_id": user_id, "state": state, "nonce": nonce, "code_verifier": flow.code_verifier,
         "started_at": int(time.time()),
     }
+    report_id = request.form.get("report_id")
+    if report_id and "reports.review" in current_app.view_functions:
+        try:
+            session["gmail_consent"]["report_id"] = UUID(report_id).hex
+        except ValueError:
+            pass
     return redirect(location, code=303)
 
 
@@ -113,6 +120,8 @@ def callback():
     except (GoogleAuthError, OAuth2Error, RequestException, KeyError, ValueError, Warning) as error:
         raise mail.MailError("Gmail could not be connected with both permissions. Connect again.", 400) from error
     mail.connect_mailbox(user_id, subject, token)
+    if pending.get("report_id") and "reports.review" in current_app.view_functions:
+        return redirect(url_for("reports.review", report_id=pending["report_id"]), code=303)
     return redirect(url_for("index"), code=303)
 
 

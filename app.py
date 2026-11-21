@@ -2,7 +2,7 @@ import importlib
 import importlib.util
 from pathlib import Path
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, redirect, url_for
 from flask_wtf.csrf import CSRFProtect, generate_csrf
 
 from config import default_config
@@ -30,6 +30,8 @@ def create_app(config=None):
 
     @app.get("/")
     def index():
+        if "reports.new" in app.view_functions:
+            return redirect(url_for("reports.new"))
         return jsonify(
             project="Fix It Bulls",
             stage="Shared foundation; feature modules are pending.",

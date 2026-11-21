@@ -17,7 +17,7 @@ from schemas import AnalysisOutput, ReportInput, RoutingOutput
 DIRECTORY_PATH = Path(__file__).resolve().parent.parent / "data" / "routing_directory.json"
 
 # Physical building problems: who owns them depends on the kind of site.
-PHYSICAL_TYPES = {"plumbing", "lighting", "physical_damage", "cleanliness", "access_barrier"}
+PHYSICAL_TYPES = {"plumbing", "lighting", "physical_damage", "cleanliness"}
 # Issue types with no maintained route yet: offer cited research instead.
 RESEARCH_ONLY_TYPES = {
     "parking_transport", "recreation_equipment", "physical_id_card",
@@ -177,7 +177,7 @@ def route_for_analysis(report: ReportInput, analysis: AnalysisOutput) -> Routing
     if analysis.possible_urgent_concern:
         return resolve_route(report, analysis.suggested_issue_type, urgent=True)
     unanswered = [q for q in analysis.questions if q not in report.clarification_answers]
-    if unanswered and len(report.clarification_answers) < 2:
+    if unanswered and not report.clarification_answers:
         return RoutingOutput(
             state="needs_details",
             reason="Please answer the question(s) below so the report goes to the right place.",

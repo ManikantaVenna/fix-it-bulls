@@ -11,7 +11,17 @@
   <header class="site-header">
     <div class="site-header-inner">
       <a class="brand" href="{{ url_for('reports.new') }}">Fix It Bulls<span>.</span></a>
-      <span class="campus">USF Tampa</span>
+      <nav aria-label="Main navigation">
+        {% if session.get('user_id') %}
+          <a href="{{ url_for('reports.history') }}">My reports</a>
+          <form method="post" action="{{ url_for('auth.logout') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit">Sign out</button>
+          </form>
+        {% else %}
+          <a href="{{ url_for('auth.start') }}">Sign in with Google</a>
+        {% endif %}
+      </nav>
     </div>
   </header>
   <main class="page">

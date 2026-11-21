@@ -39,6 +39,14 @@ def test_residence_hall_internet_goes_to_it_not_housing():
     assert out.route_id == "usf_it_help"
 
 
+@pytest.mark.parametrize("site_type", ["non_residential", "residence_hall", "outdoor", "unknown"])
+def test_access_barrier_uses_usfs_physical_barrier_form(site_type):
+    out = resolve_route(report(site_type=site_type, description="The ramp is blocked."), "access_barrier")
+    assert out.state == "ready_handoff"
+    assert out.route_id == "usf_physical_access_barrier"
+    assert get_sendable_route(out.route_id) is None
+
+
 @pytest.mark.parametrize("issue", ["access_reader", "computer_av", "network_phone"])
 def test_it_issues_go_to_it(issue):
     assert resolve_route(report(), issue).route_id == "usf_it_help"
@@ -129,7 +137,9 @@ def test_directory_entries_are_complete_and_cite_official_pages():
         assert date.fromisoformat(r["checked_date"])
         assert r["channel"] in {"email", "form"}
         assert (r["channel"] == "email") == bool(r["recipient"])
-        assert set(r["issue_types"]) <= set(routing.PHYSICAL_TYPES | {"network_phone", "access_reader", "computer_av"})
+        assert set(r["issue_types"]) <= routing.PHYSICAL_TYPES | {
+            "network_phone", "access_reader", "computer_av", "access_barrier",
+        }
     assert "911" in directory["urgent_guidance"]["message"]
 
 

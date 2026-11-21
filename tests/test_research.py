@@ -71,6 +71,20 @@ def test_residence_hall_name_is_not_searched():
     assert "residence hall" in context
 
 
+def test_free_text_and_location_are_excluded_from_the_provider_prompt():
+    client = FakeClient(response())
+    private_report = report(
+        site_type="residence_hall", building_or_area="Juniper Hall",
+        description="Sample Student in Juniper Hall reports a broken lift.",
+    )
+    result = research_channel(private_report, issue_type="access_barrier", client=client)
+    prompt = client.calls[0]["contents"]
+    assert "Sample Student" not in prompt
+    assert "Juniper Hall" not in prompt
+    assert "access barrier" in prompt
+    assert "Sample Student" in result.editable_draft
+
+
 def test_no_grounding_is_not_research_success():
     out = research_channel(report(), client=FakeClient(response(chunks=())))
     assert out.status == "no_result"

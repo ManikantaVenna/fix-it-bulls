@@ -19,7 +19,7 @@
       {% if not errors.form %}If you selected a photo, choose it again before continuing.{% endif %}
     </div>
   {% elif not signed_in %}
-    <p class="notice">A signed-in session is required to save a report. You can try the photo preview here.</p>
+    <p class="notice"><a href="{{ url_for('auth.start') }}">Sign in with Google</a> to save a report.</p>
   {% endif %}
   <form class="panel" method="post" enctype="multipart/form-data" action="{{ url_for('reports.new') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

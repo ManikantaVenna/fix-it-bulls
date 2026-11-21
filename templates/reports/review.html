@@ -1,15 +1,19 @@
 {% extends "base.html" %}
 {% block title %}Review your draft | Fix It Bulls{% endblock %}
+{% macro form_fields() %}
+  <input type="hidden" name="report_version" value="{{ saved.version }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+{% endmacro %}
 {% block content %}
   <div class="page-heading">
     <a class="back-link" href="{{ url_for('reports.new') }}">Start a new report</a>
     <h1>Review your draft</h1>
-    <p>Your original report is saved. You can edit and download the text below.</p>
+    <p>{{ report.building_or_area }}{% if report.room_floor_landmark %} · {{ report.room_floor_landmark }}{% endif %}</p>
   </div>
+  {% if error %}<p class="notice error" role="alert">{{ error }}</p>{% endif %}
   <div class="review-grid">
     <section class="panel" aria-labelledby="draft">
       <h2 id="draft">Report draft</h2>
-      <p class="hint">Edits are included in your download.</p>
       <div class="field">
         <label for="draft-subject">Subject</label>
         <input id="draft-subject" maxlength="200" value="{{ subject }}">
@@ -18,10 +22,138 @@
         <label for="draft-body">Message</label>
         <textarea id="draft-body" rows="10">{{ body }}</textarea>
       </div>
-      <button type="button" class="button primary" id="download-draft" hidden>Download draft</button>
+      <button type="button" class="button secondary" id="download-draft" hidden>Download draft</button>
+      <div id="mail-controls"
+           data-csrf="{{ csrf_token() }}"
+           data-review-url="{{ url_for('gmail.email_review', report_id=report_id) }}"
+           data-send-url="{{ url_for('gmail.approve_send', report_id=report_id) }}"
+           data-replies-url="{{ url_for('gmail.check_replies', report_id=report_id) }}"
+           data-report-version="{{ saved.version }}"
+           data-issue-type="{{ analysis.suggested_issue_type if analysis else '' }}">
+        <p class="notice" id="mail-status" role="status" hidden></p>
+        <a id="mail-guidance" hidden>Open USF guidance</a>
+        {% if not locked and route and route.state == "ready_email" and connected %}
+          <button type="button" class="button primary" id="preview-email" hidden>Review test email</button>
+          <section class="email-preview" id="email-preview" aria-labelledby="preview-heading" hidden>
+            <h3 id="preview-heading">Confirm test email</h3>
+            <dl id="email-details"></dl>
+            <pre id="email-body"></pre>
+            <button type="button" class="button primary" id="send-email">Send report</button>
+          </section>
+        {% elif saved.communication_status in ("sent", "reply_received") %}
+          <p><strong>{{ "Reply received" if saved.communication_status == "reply_received" else "Sent" }}</strong></p>
+          {% if connected %}
+            <button type="button" class="button primary" id="check-replies" hidden>Check for replies</button>
+            <ul class="reply-list" id="reply-list"></ul>
+          {% endif %}
+        {% elif locked %}
+          <p class="notice">Delivery needs verification. Check the original message in your Gmail Sent folder.</p>
+        {% endif %}
+      </div>
     </section>
     <aside class="panel evidence" aria-labelledby="evidence">
-      <h2 id="evidence">Original report</h2>
+      <h2 id="evidence">Reporting options</h2>
+      {% if route and route.state == "urgent_guidance" %}
+        <div class="notice error report-option" role="alert">
+          <h3>Urgent guidance</h3>
+          <p>{{ route.reason }}</p>
+          <a href="{{ route.official_source }}">Open USF guidance</a>
+        </div>
+      {% elif not locked %}
+        {% if route %}
+          <div class="report-option">
+            {% if destination %}<h3>{{ destination.name }}</h3>{% endif %}
+            <p>{{ route.reason }}</p>
+            {% if route.state == "ready_email" %}
+              <p>USF contact <strong>{{ destination.recipient }}</strong></p>
+              <p class="hint">Demo emails go to the configured test inbox.</p>
+            {% elif route.state == "ready_handoff" and destination %}
+              <a class="button secondary link-button" href="{{ destination.handoff_url }}">Open official form</a>
+              <p class="hint">Complete and submit your report on the USF form.</p>
+            {% endif %}
+            {% if route.official_source %}<p><a href="{{ route.official_source }}">Official USF instructions</a></p>{% endif %}
+          </div>
+        {% endif %}
+        {% if route and route.state == "needs_details" %}
+          {% if analysis and analysis.questions and not report.clarification_answers %}
+            <form class="report-option" method="post" action="{{ url_for('reports.analyze', report_id=report_id) }}">
+              {{ form_fields() }}
+              {% for question in analysis.questions %}
+                <label for="answer-{{ loop.index0 }}">{{ question }}</label>
+                <input id="answer-{{ loop.index0 }}" name="answer_{{ loop.index0 }}" maxlength="1000" required>
+              {% endfor %}
+              <button class="button secondary" type="submit" data-pending="Analyzing…">Continue analysis</button>
+            </form>
+          {% endif %}
+          <details class="report-option">
+            <summary>Update location</summary>
+            <form method="post" action="{{ url_for('reports.edit_location', report_id=report_id) }}">
+              {{ form_fields() }}
+              <label for="review-location">Room, floor, or landmark</label>
+              <input id="review-location" name="room_floor_landmark" maxlength="300" value="{{ report.room_floor_landmark }}">
+              <label for="review-site">Location type</label>
+              <select id="review-site" name="site_type">
+                {% for value, label in [('unknown', 'Not sure'), ('non_residential', 'Non-residential building'), ('residence_hall', 'Residence hall'), ('outdoor', 'Outdoor area')] %}
+                  <option value="{{ value }}"{% if report.site_type == value %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              <button class="button secondary" type="submit">Save location</button>
+            </form>
+          </details>
+        {% endif %}
+        {% if route and route.state == "research_available" %}
+          <form class="report-option" method="post" action="{{ url_for('reports.research', report_id=report_id) }}">
+            {{ form_fields() }}
+            <button class="button secondary" type="submit" data-pending="Looking up USF instructions…">Look up official instructions</button>
+          </form>
+          {% if research %}
+            <div class="report-option">
+              <h3>{{ "Suggested reporting channel" if research.status == "sourced_suggestion" else "Research result" }}</h3>
+              {% if research.status == "sourced_suggestion" %}
+                <p>{{ research.suggested_office or "Review the linked USF instructions." }}</p>
+                <p>{{ research.applicability_reason }}</p>
+              {% endif %}
+              {% for note in research.uncertainties %}<p class="hint">{{ note }}</p>{% endfor %}
+              {% if research_sources.links %}
+                <ul>
+                  {% for link in research_sources.links %}<li><a href="{{ link.url }}" rel="noreferrer">{{ link.label }}</a></li>{% endfor %}
+                </ul>
+              {% endif %}
+              {% if research_sources.widget_html %}
+                <iframe class="search-attribution" title="Google Search suggestions" sandbox="allow-popups"
+                        referrerpolicy="no-referrer" srcdoc="{{ research_sources.widget_html }}"></iframe>
+              {% endif %}
+            </div>
+          {% endif %}
+        {% endif %}
+        {% if not analysis %}
+          <form class="report-option" method="post" action="{{ url_for('reports.analyze', report_id=report_id) }}">
+            {{ form_fields() }}
+            <button class="button primary" type="submit" data-pending="Analyzing…">Analyze with Gemini</button>
+          </form>
+        {% endif %}
+        <details class="report-option"{% if error %} open{% endif %}>
+          <summary>Choose a category</summary>
+          <form method="post" action="{{ url_for('reports.analyze', report_id=report_id) }}">
+            {{ form_fields() }}
+            <label for="issue-type">Issue category</label>
+            <select id="issue-type" name="issue_type" required>
+              {% for value, label in issue_labels.items() %}
+                <option value="{{ value }}"{% if analysis and analysis.suggested_issue_type == value %} selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+            <button class="button secondary" type="submit">Find reporting channel</button>
+          </form>
+        </details>
+      {% endif %}
+      {% if not connected and ((route and route.state == "ready_email" and not locked) or saved.communication_status in ("sent", "reply_received")) %}
+        <form class="report-option" method="post" action="{{ url_for('gmail.connect') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="report_id" value="{{ report_id }}">
+          <button class="button secondary" type="submit">Connect Gmail</button>
+        </form>
+      {% endif %}
+      <h2>Original report</h2>
       <dl>
         <dt>Location</dt>
         <dd>{{ report.building_or_area }}{% if report.room_floor_landmark %}<br>{{ report.room_floor_landmark }}{% endif %}</dd>

@@ -10,11 +10,12 @@ official-channel handoff: it can't create a send-enabled route.
 import json
 import re
 from datetime import datetime, timezone
+from typing import get_args
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ValidationError
 
-from schemas import ReportInput, ResearchResult
+from schemas import IssueType, ReportInput, ResearchResult
 from services.ai import AIUnavailableError, generate, get_client, http_options, model_name
 
 OFFICIAL_DOMAIN = "usf.edu"
@@ -54,22 +55,12 @@ class _Finding(BaseModel):
     found_official_instructions: bool = False
 
 
-def _sanitize(text: str, limit: int = 240) -> str:
-    """Strip details that identify a person or exact spot before searching."""
-    text = re.sub(r"\S+@\S+", "[email]", text)
-    text = re.sub(r"\+?\d[\d\s().-]{6,}\d", "[number]", text)
-    text = re.sub(r"\b[A-Za-z]{0,4}-?\d{2,}[A-Za-z]?\b", "[id]", text)  # room numbers, asset tags
-    return " ".join(text.split())[:limit]
-
-
 def build_query_context(report: ReportInput, issue_type: str = "other") -> str:
-    # Residence halls: never send the hall or room, only that it's housing.
-    place = "a residence hall" if report.site_type == "residence_hall" else _sanitize(report.building_or_area, 80)
+    category = issue_type if issue_type in get_args(IssueType) else "other"
     return (
         f"Campus: University of South Florida, Tampa campus.\n"
-        f"Issue type: {issue_type.replace('_', ' ')}.\n"
-        f"Site type: {report.site_type.replace('_', ' ')}; general location: {place}.\n"
-        f"Problem summary: {_sanitize(report.description)}"
+        f"Issue type: {category.replace('_', ' ')}.\n"
+        f"Site type: {report.site_type.replace('_', ' ')}."
     )
 
 

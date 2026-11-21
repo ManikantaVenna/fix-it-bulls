@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}My reports | Fix It Bulls{% endblock %}
+{% block content %}
+  <div class="page-heading">
+    <a class="back-link" href="{{ url_for('reports.new') }}">Report a campus issue</a>
+    <h1>My reports</h1>
+  </div>
+  <section class="panel" aria-label="Saved reports">
+    {% if reports %}
+      <ul class="report-list">
+        {% for row in reports %}
+          <li>
+            <a href="{{ url_for('reports.review', report_id=row.id) }}">{{ row.location }}</a>
+            <span>{{ row.communication_status | replace('_', ' ') | capitalize }}</span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p>You have no saved reports yet.</p>
+    {% endif %}
+  </section>
+{% endblock %}

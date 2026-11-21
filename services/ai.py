@@ -7,25 +7,16 @@ department: routing.resolve_route does that from the maintained directory.
 
 import json
 import os
-import re
 from pathlib import Path
 
 from dotenv import dotenv_values
 from pydantic import BaseModel, ValidationError
 
 from schemas import AnalysisOutput, IssueType, ReportInput
+from services.urgency import has_urgent_text
 
 DEFAULT_MODEL = "gemini-3.8-flash"  # 2.5 models are closed to new API keys
 ROOT = Path(__file__).resolve().parent.parent
-
-# Words that should always send a report to urgent guidance, even if the model
-# misses them. Better to show emergency numbers once too often than too rarely.
-URGENT_PATTERN = re.compile(
-    r"\b(fire|smoke|smoking|burning|sparks?|sparking|gas (leak|smell)|smell(s|ing)? (of )?gas|"
-    r"carbon monoxide|live wire|electrocut\w*|flood(ed|ing)?|trapped|stuck in (the |an )?elevator|"
-    r"injur\w*|bleeding|unconscious|weapon|gun|assault\w*)\b",
-    re.IGNORECASE,
-)
 
 ISSUE_TYPE_GUIDE = """
 plumbing: leaks, clogged/overflowing sinks or toilets, broken fountains or bottle fillers
@@ -162,7 +153,9 @@ def _to_contract(raw: _GeminiAnalysis, report: ReportInput) -> AnalysisOutput:
     missing = list(raw.missing_fields)
     if not report.room_floor_landmark.strip():
         missing.append("room_floor_landmark")
-    urgent = raw.possible_urgent_concern or bool(URGENT_PATTERN.search(report.description))
+    urgent = raw.possible_urgent_concern or has_urgent_text(
+        report.description, *report.clarification_answers.values(),
+    )
     return AnalysisOutput(
         observations=_clip(raw.observations, 10),
         user_reported_facts=_clip(raw.user_reported_facts, 10),

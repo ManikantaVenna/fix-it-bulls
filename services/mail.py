@@ -101,8 +101,16 @@ def _resolve_route(report, issue_type):
     return resolve_route(ReportInput.model_validate(report), issue_type)
 
 
-def _verified_route(report, issue_type):
-    route = _resolve_route(report, issue_type)
+def _verified_route(saved, issue_type):
+    analysis = saved["analysis"]
+    if analysis is None:
+        route = _resolve_route(saved["report"], issue_type)
+    else:
+        from services.routing import route_for_analysis
+
+        if issue_type != analysis.suggested_issue_type:
+            raise MailError("The issue category changed. Review the current report.")
+        route = route_for_analysis(ReportInput.model_validate(saved["report"]), analysis)
     if route.state == "urgent_guidance":
         raise UrgentReportError()
     if route.state != "ready_email" or not route.route_id or not route.official_source:
@@ -159,7 +167,7 @@ def prepare_email_review(user_id, report_id, report_version, issue_type, subject
     if not body.strip() or len(body) > 4000:
         raise MailError("Provide a message of at most 4,000 characters.", 400)
     fields = report["report"]
-    route = _verified_route(fields, issue_type)
+    route = _verified_route(report, issue_type)
     approval_id = uuid4().hex
     snapshot = {
         "route": route, "issue_type": issue_type, "sender": _owner(user_id)["email"],
@@ -174,6 +182,8 @@ def prepare_email_review(user_id, report_id, report_version, issue_type, subject
             raise MailError("The report changed while preparing the email. Review it again.")
         if latest["flagged_urgent"]:
             raise UrgentReportError()
+        if latest["analysis"] != report["analysis"]:
+            raise MailError("The analysis changed. Review the current report.")
         db.execute(
             "INSERT INTO gmail_reviews(report_id,id,version,snapshot_json) VALUES(?,?,?,?) "
             "ON CONFLICT(report_id) DO UPDATE SET id=excluded.id,version=excluded.version,snapshot_json=excluded.snapshot_json",
@@ -212,7 +222,7 @@ def send_approved_report(user_id, report_id, approved_version, *, approval_id):
         _require_routine_report(report, snapshot["subject"], snapshot["body"])
         photo = _photo(user_id, report["report"])
         if (
-            snapshot["route"] != _verified_route(report["report"], snapshot["issue_type"])
+            snapshot["route"] != _verified_route(report, snapshot["issue_type"])
             or snapshot["recipient"] != _test_recipient()
             or snapshot["sender"] != _owner(user_id)["email"]
             or snapshot["photo_hash"] != _photo_hash(photo)

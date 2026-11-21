@@ -56,6 +56,11 @@ def init_db():
             version INTEGER NOT NULL,
             PRIMARY KEY (report_id, version)
         );
+        CREATE TABLE IF NOT EXISTS report_analysis (
+            report_id TEXT PRIMARY KEY REFERENCES reports(id) ON DELETE CASCADE,
+            version INTEGER NOT NULL,
+            analysis_json TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS gmail_connections (
             user_id TEXT PRIMARY KEY REFERENCES users(id),
             encrypted_refresh_token BLOB NOT NULL
@@ -123,15 +128,18 @@ def create_report(user_id, report):
 
 def get_report(user_id, report_id):
     row = get_db().execute(
-        "SELECT reports.*, EXISTS (SELECT 1 FROM urgent_report_versions "
-        "WHERE report_id=reports.id AND version=reports.version) AS flagged_urgent "
-        "FROM reports WHERE id=? AND user_id=?",
+        "SELECT reports.*, report_analysis.analysis_json, EXISTS (SELECT 1 FROM urgent_report_versions "
+        "WHERE urgent_report_versions.report_id=reports.id AND urgent_report_versions.version=reports.version) AS flagged_urgent "
+        "FROM reports LEFT JOIN report_analysis ON report_analysis.report_id=reports.id "
+        "AND report_analysis.version=reports.version WHERE reports.id=? AND reports.user_id=?",
         (report_id, user_id),
     ).fetchone()
     if row is None:
         return None
     report = dict(row)
     report["report"] = json.loads(report.pop("report_json"))
+    analysis_json = report.pop("analysis_json")
+    report["analysis"] = AnalysisOutput.model_validate_json(analysis_json) if analysis_json else None
     report["flagged_urgent"] = bool(report["flagged_urgent"])
     return report
 
@@ -150,7 +158,20 @@ def record_urgent_analysis(user_id: str, report_id: str, version: int, analysis:
     return result.rowcount > 0
 
 
-def update_report(user_id, report_id, changes):
+def save_report_analysis(user_id: str, report_id: str, version: int, analysis: AnalysisOutput) -> bool:
+    db = get_db()
+    with db:
+        result = db.execute(
+            "INSERT INTO report_analysis(report_id,version,analysis_json) "
+            "SELECT id,version,? FROM reports WHERE id=? AND user_id=? AND version=? "
+            "AND communication_status IN ('prepared','send_failed') "
+            "ON CONFLICT(report_id) DO UPDATE SET version=excluded.version,analysis_json=excluded.analysis_json",
+            (analysis.model_dump_json(), report_id, user_id, version),
+        )
+    return result.rowcount > 0
+
+
+def update_report(user_id, report_id, changes, *, expected_version=None):
     if not isinstance(changes, dict) or set(changes) - set(ReportInput.model_fields):
         raise ValueError("Only report input fields can be edited")
     db = get_db()
@@ -160,6 +181,8 @@ def update_report(user_id, report_id, changes):
         existing = get_report(user_id, report_id)
         if existing is None:
             raise LookupError("Report not found")
+        if expected_version is not None and existing["version"] != expected_version:
+            raise ReportLockedError("The report changed. Reload the latest version.")
         if existing["communication_status"] in {"sending", "sent", "send_unknown", "reply_received"}:
             raise ReportLockedError("Preserve outbound evidence; create an explicit correction instead")
         report = ReportInput.model_validate({**existing["report"], **changes})
