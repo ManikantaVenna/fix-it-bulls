@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Report a campus issue | Fix It Bulls{% endblock %}
+{% macro field_error(name) %}
+  {% if errors[name] %}<p class="field-error" id="{{ name }}-error">{{ errors[name] }}</p>{% endif %}
+{% endmacro %}
+{% macro attributes(name, help='') -%}
+  {%- if errors[name] %} aria-invalid="true" aria-describedby="{{ name }}-error{% if help %} {{ help }}{% endif %}"
+  {%- elif help %} aria-describedby="{{ help }}"
+  {%- endif -%}
+{% endmacro %}
+{% block content %}
+  <div class="page-heading">
+    <h1>Report a campus issue</h1>
+    <p>Describe one non-urgent problem and tell us where to find it.</p>
+  </div>
+  {% if errors %}
+    <div class="notice error" role="alert">
+      {{ errors.form or "Check the highlighted fields, then try again." }}
+      {% if not errors.form %}If you selected a photo, choose it again before continuing.{% endif %}
+    </div>
+  {% elif not signed_in %}
+    <p class="notice">A signed-in session is required to save a report. You can try the photo preview here.</p>
+  {% endif %}
+  <form class="panel" method="post" enctype="multipart/form-data" action="{{ url_for('reports.new') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="field">
+      <label for="description">What happened?</label>
+      <textarea name="description" id="description" maxlength="4000" rows="4" required{{ attributes('description') }}
+        placeholder="For example, the water fountain does not dispense water.">{{ values.get('description', '') }}</textarea>
+      {{ field_error('description') }}
+    </div>
+    <fieldset>
+      <legend>Where is it?</legend>
+      <div class="field-grid">
+        <div class="field">
+          <label for="building_or_area">Building or area</label>
+          <input name="building_or_area" id="building_or_area" maxlength="200" required{{ attributes('building_or_area') }}
+            value="{{ values.get('building_or_area', '') }}" placeholder="For example, Marshall Student Center">
+          {{ field_error('building_or_area') }}
+        </div>
+        <div class="field">
+          <label for="room_floor_landmark">Room, floor, or landmark <span>Optional</span></label>
+          <input name="room_floor_landmark" id="room_floor_landmark" maxlength="300"{{ attributes('room_floor_landmark') }}
+            value="{{ values.get('room_floor_landmark', '') }}" placeholder="For example, first floor by the elevators">
+          {{ field_error('room_floor_landmark') }}
+        </div>
+        <div class="field">
+          <label for="site_type">Location type</label>
+          <select name="site_type" id="site_type"{{ attributes('site_type') }}>
+            {% for value, label in [('unknown', 'Not sure'), ('non_residential', 'Non-residential building'), ('residence_hall', 'Residence hall'), ('outdoor', 'Outdoor area')] %}
+              <option value="{{ value }}"{% if values.get('site_type', 'unknown') == value %} selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          {{ field_error('site_type') }}
+        </div>
+        <div class="field">
+          <label for="ownership">Who owns the equipment?</label>
+          <select name="ownership" id="ownership"{{ attributes('ownership') }}>
+            {% for value, label in [('unknown', 'Not sure or not applicable'), ('campus', 'USF'), ('personal', 'Personal equipment')] %}
+              <option value="{{ value }}"{% if values.get('ownership', 'unknown') == value %} selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          {{ field_error('ownership') }}
+        </div>
+        <div class="field">
+          <label for="asset_tag">Equipment label <span>Optional</span></label>
+          <input name="asset_tag" id="asset_tag" maxlength="100"{{ attributes('asset_tag') }} value="{{ values.get('asset_tag', '') }}">
+          {{ field_error('asset_tag') }}
+        </div>
+      </div>
+    </fieldset>
+    <div class="field photo-field">
+      <label for="photo">Add a photo <span>Optional</span></label>
+      <p class="hint" id="photo-help">One JPEG, PNG, or WebP image, up to 5 MB.</p>
+      <input type="file" name="photo" id="photo" accept="image/jpeg,image/png,image/webp"{{ attributes('photo', 'photo-help') }}>
+      {{ field_error('photo') }}
+      <div class="preview" id="preview" hidden>
+        <img id="preview-image" alt="Preview of the selected photo">
+        <button class="button secondary" type="button" id="remove-photo">Remove photo</button>
+      </div>
+    </div>
+    <button class="button primary" type="submit"{% if not signed_in %} disabled{% endif %}>Save and review</button>
+  </form>
+{% endblock %}
