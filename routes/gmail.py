@@ -165,6 +165,13 @@ def email_review(report_id):
     return jsonify(mail.prepare_email_review(user_id, report_id, **data.model_dump()))
 
 
+@bp.post("/reports/<report_id>/email-draft")
+def email_draft(report_id):
+    user_id = _user_id()
+    data = EmailReviewInput.model_validate(request.get_json(silent=True))
+    return jsonify(mail.prepare_external_draft(user_id, report_id, **data.model_dump()))
+
+
 @bp.post("/reports/<report_id>/approve-send")
 def approve_send(report_id):
     user_id = _user_id()

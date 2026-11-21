@@ -129,6 +129,54 @@ def test_review_only_uses_maintained_routes(setup, monkeypatch):
             preview(owner, report)
 
 
+def test_official_delivery_uses_directory_and_invalidates_old_test_approval(setup, monkeypatch):
+    app, owner, _, report = setup
+    monkeypatch.setattr(mail, "_resolve_route", lambda *_: RoutingOutput(
+        state="ready_email", route_id="usf_facilities_service_center",
+        reason="Facilities handles the issue.",
+        official_source="https://www.usf.edu/facilities/service-center/work-requests.aspx",
+    ))
+
+    def deliver(token, raw):
+        message = BytesParser(policy=policy.default).parsebytes(base64.urlsafe_b64decode(raw))
+        assert str(message["To"]) == "FM-ServiceCenter@usf.edu"
+        assert str(message["Subject"]) == "Leaking fixture"
+        return {"id": "official-fixture", "threadId": "official-thread"}
+
+    monkeypatch.setattr(mail.gmail_client, "send_message", deliver)
+    with app.app_context():
+        connect(owner)
+        test_review = preview(owner, report)
+        app.config["SEND_MODE"] = "OFFICIAL"
+        with pytest.raises(mail.MailError, match="Review the email again"):
+            send(owner, report, test_review)
+        official_review = preview(owner, report)
+        assert official_review["mode"] == "OFFICIAL"
+        assert official_review["recipient"] == "FM-ServiceCenter@usf.edu"
+        assert send(owner, report, official_review).state == "sent"
+
+
+def test_external_draft_uses_official_recipient_without_mailbox_or_send(setup, monkeypatch):
+    app, owner, stranger, report = setup
+    app.config["SEND_MODE"] = "OFFICIAL"
+    monkeypatch.setattr(mail, "_resolve_route", lambda *_: RoutingOutput(
+        state="ready_email", route_id="usf_it_help", reason="IT handles the issue.",
+        official_source="https://www.usf.edu/it/get-help/",
+    ))
+    with app.app_context():
+        assert not mail.mailbox_connected(owner)
+        draft = mail.prepare_external_draft(owner, report, 1, "computer_av", "Screen & keyboard", "Issue in lab.")
+        assert draft == {
+            "recipient": "help@usf.edu",
+            "draft_url": "mailto:help@usf.edu?subject=Screen%20%26%20keyboard&body=Issue%20in%20lab.",
+        }
+        with pytest.raises(mail.MailError, match="Report not found"):
+            mail.prepare_external_draft(stranger, report, 1, "computer_av", "Screen", "Issue in lab.")
+        with pytest.raises(mail.UrgentReportError):
+            mail.prepare_external_draft(owner, report, 1, "computer_av", "Screen", "Sparks coming from the outlet.")
+        assert get_report(owner, report)["communication_status"] == "prepared"
+
+
 @pytest.mark.parametrize(
     "changes, subject, body",
     [

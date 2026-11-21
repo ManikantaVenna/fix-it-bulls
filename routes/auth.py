@@ -100,9 +100,8 @@ def clear_oauth_cookie(response, callback_endpoint, cookie_name):
 @bp.get("/auth/google/start")
 def start():
     config = current_app.config
-    if not all(config.get(key) for key in (
-        "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI", "ALLOWED_GOOGLE_EMAILS",
-    )):
+    has_client = all(config.get(key) for key in ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI"))
+    if not has_client or not (config["PUBLIC_GOOGLE_SIGN_IN"] or config["ALLOWED_GOOGLE_EMAILS"]):
         return oauth_problem(
             "Google sign-in is unavailable",
             "Ask the project owner to check the test site's Google sign-in setup.",
@@ -145,7 +144,8 @@ def _finish_sign_in(pending):
         or not subject
     ):
         return oauth_problem("Google account could not be verified", "Try again with a verified Google account.", 403)
-    if email.strip().casefold() not in current_app.config["ALLOWED_GOOGLE_EMAILS"]:
+    config = current_app.config
+    if not config["PUBLIC_GOOGLE_SIGN_IN"] and email.strip().casefold() not in config["ALLOWED_GOOGLE_EMAILS"]:
         return oauth_problem(
             "This account needs test access",
             "Choose an invited Google account or ask the project owner to add yours.",

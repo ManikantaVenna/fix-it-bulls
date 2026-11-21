@@ -207,6 +207,9 @@ if (mailControls) {
   const preview = document.querySelector("#email-preview");
   const send = document.querySelector("#send-email");
   const check = document.querySelector("#check-replies");
+  const externalButton = document.querySelector("#prepare-external-email");
+  const externalPreview = document.querySelector("#external-email");
+  const emailDraft = document.querySelector("#open-email-draft");
   const version = Number(mailControls.dataset.reportVersion);
   let approval;
 
@@ -233,10 +236,49 @@ if (mailControls) {
         previewButton.hidden = true;
         hidePreview();
       }
+      if (externalButton) {
+        externalButton.hidden = true;
+        hideExternalDraft();
+      }
       guidance.href = result.guidance_url;
       guidance.hidden = false;
     }
     throw new Error(result.error || "This action failed. Refresh the page and try again.");
+  }
+
+  function hideExternalDraft() {
+    externalPreview.hidden = true;
+    emailDraft.removeAttribute("href");
+  }
+
+  if (externalButton) {
+    externalButton.hidden = false;
+    subject.addEventListener("input", hideExternalDraft);
+    body.addEventListener("input", hideExternalDraft);
+    externalButton.addEventListener("click", async () => {
+      hideExternalDraft();
+      externalButton.disabled = true;
+      showStatus("Preparing email draft…");
+      const draft = { subject: subject.value, body: body.value };
+      try {
+        const result = await post(mailControls.dataset.draftUrl, {
+          ...draft, report_version: version, issue_type: mailControls.dataset.issueType,
+        });
+        if (subject.value !== draft.subject || body.value !== draft.body) {
+          showStatus("The draft changed. Prepare it again.");
+          return;
+        }
+        document.querySelector("#external-recipient").textContent = result.recipient;
+        emailDraft.href = result.draft_url;
+        externalPreview.hidden = false;
+        showStatus("");
+        emailDraft.focus();
+      } catch (error) {
+        showStatus(error.message);
+      } finally {
+        externalButton.disabled = false;
+      }
+    });
   }
 
   if (previewButton) {
@@ -246,7 +288,7 @@ if (mailControls) {
     previewButton.addEventListener("click", async () => {
       hidePreview();
       previewButton.disabled = true;
-      showStatus("Preparing test email…");
+      showStatus("Preparing email…");
       const draft = { subject: subject.value, body: body.value };
       try {
         const result = await post(mailControls.dataset.reviewUrl, {
@@ -260,7 +302,7 @@ if (mailControls) {
         const details = document.querySelector("#email-details");
         details.replaceChildren();
         for (const [label, value] of [
-          ["From", result.sender], ["Test recipient", result.recipient],
+          ["From", result.sender], [result.mode === "TEST" ? "Test recipient" : "To", result.recipient],
           ["Subject", result.subject], ["Attachment", result.photo_id ? "Report photo" : "None"],
         ]) {
           const term = document.createElement("dt");
@@ -284,7 +326,7 @@ if (mailControls) {
       const approved = approval;
       send.disabled = true;
       previewButton.disabled = true;
-      showStatus("Sending test email…");
+      showStatus("Sending email…");
       try {
         const result = await post(mailControls.dataset.sendUrl, {
           approved_version: approved.report_version, approval_id: approved.approval_id,

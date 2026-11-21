@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from email.errors import HeaderParseError, InvalidHeaderDefect
 from email.headerregistry import Address
 from email.utils import make_msgid
+from urllib.parse import quote, urlencode
 from uuid import uuid4
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -118,16 +119,33 @@ def _verified_route(saved, issue_type):
     return route.model_dump(mode="json")
 
 
-def _test_recipient():
-    value = current_app.config.get("TEST_RECIPIENT") or ""
+def _email_address(value, *, error_message="A single valid email recipient is required."):
     try:
         address = Address(addr_spec=value)
         if not address.username or not address.domain:
             raise ValueError
     except (ValueError, TypeError, HeaderParseError, InvalidHeaderDefect) as error:
-        raise MailError("Configure a single controlled TEST_RECIPIENT address.", 503) from error
-    if current_app.config["SEND_MODE"] != "TEST":
-        raise MailError("Email delivery on this branch requires TEST mode.", 503)
+        raise MailError(error_message, 503) from error
+    return address
+
+
+def _delivery_recipient(route):
+    mode = current_app.config["SEND_MODE"]
+    if mode == "TEST":
+        return _email_address(
+            current_app.config.get("TEST_RECIPIENT") or "",
+            error_message="Configure a single controlled TEST_RECIPIENT address.",
+        ).addr_spec
+    if mode != "OFFICIAL":
+        raise MailError("Email delivery is not configured.", 503)
+    from services.routing import get_sendable_route
+
+    destination = get_sendable_route(route["route_id"])
+    if not destination:
+        raise MailError("The verified email contact is no longer available.")
+    address = _email_address(destination["recipient"])
+    if address.domain.casefold() != "usf.edu":
+        raise MailError("The verified email contact must use an official USF address.")
     return address.addr_spec
 
 
@@ -152,12 +170,11 @@ def _photo_hash(photo):
     return hashlib.sha256(photo).hexdigest() if photo is not None else None
 
 
-def prepare_email_review(user_id, report_id, report_version, issue_type, subject, body):
+def _email_draft_details(user_id, report_id, report_version, issue_type, subject, body):
     report = _report(user_id, report_id)
     if report["version"] != report_version or report["communication_status"] in LOCKED_STATES:
         raise MailError("The report changed or already has an outbound email.")
     _require_routine_report(report, subject, body)
-    _refresh_token(user_id)
     try:
         ISSUE_TYPE.validate_python(issue_type)
     except ValueError as error:
@@ -166,12 +183,29 @@ def prepare_email_review(user_id, report_id, report_version, issue_type, subject
         raise MailError("Provide a single-line subject of at most 200 characters.", 400)
     if not body.strip() or len(body) > 4000:
         raise MailError("Provide a message of at most 4,000 characters.", 400)
-    fields = report["report"]
     route = _verified_route(report, issue_type)
+    return report, route
+
+
+def prepare_external_draft(user_id, report_id, report_version, issue_type, subject, body):
+    if current_app.config["SEND_MODE"] != "OFFICIAL":
+        raise MailError("Opening email drafts requires official delivery mode.")
+    _, route = _email_draft_details(user_id, report_id, report_version, issue_type, subject, body)
+    recipient = _delivery_recipient(route)
+    query = urlencode({"subject": subject.strip(), "body": body.strip()}, quote_via=quote)
+    return {"recipient": recipient, "draft_url": f"mailto:{quote(recipient, safe='@')}?{query}"}
+
+
+def prepare_email_review(user_id, report_id, report_version, issue_type, subject, body):
+    report, route = _email_draft_details(user_id, report_id, report_version, issue_type, subject, body)
+    _refresh_token(user_id)
+    fields = report["report"]
+    mode = current_app.config["SEND_MODE"]
+    outgoing_subject = f"[DEMO] [{report_id[:8]}] {subject.strip()}" if mode == "TEST" else subject.strip()
     approval_id = uuid4().hex
     snapshot = {
         "route": route, "issue_type": issue_type, "sender": _owner(user_id)["email"],
-        "recipient": _test_recipient(), "subject": f"[DEMO] [{report_id[:8]}] {subject.strip()}",
+        "recipient": _delivery_recipient(route), "subject": outgoing_subject, "mode": mode,
         "body": body.strip(), "photo_id": fields.get("photo_id"), "photo_hash": _photo_hash(_photo(user_id, fields)),
     }
     db = get_db()
@@ -191,7 +225,7 @@ def prepare_email_review(user_id, report_id, report_version, issue_type, subject
         )
     return {
         **{key: value for key, value in snapshot.items() if key != "photo_hash"},
-        "approval_id": approval_id, "report_version": report_version, "mode": "TEST",
+        "approval_id": approval_id, "report_version": report_version,
     }
 
 
@@ -221,9 +255,11 @@ def send_approved_report(user_id, report_id, approved_version, *, approval_id):
         snapshot = json.loads(review["snapshot_json"])
         _require_routine_report(report, snapshot["subject"], snapshot["body"])
         photo = _photo(user_id, report["report"])
+        route = _verified_route(report, snapshot["issue_type"])
         if (
-            snapshot["route"] != _verified_route(report, snapshot["issue_type"])
-            or snapshot["recipient"] != _test_recipient()
+            snapshot.get("mode", "TEST") != current_app.config["SEND_MODE"]
+            or snapshot["route"] != route
+            or snapshot["recipient"] != _delivery_recipient(route)
             or snapshot["sender"] != _owner(user_id)["email"]
             or snapshot["photo_hash"] != _photo_hash(photo)
         ):

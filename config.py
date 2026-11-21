@@ -16,7 +16,10 @@ def default_config():
         "SESSION_COOKIE_HTTPONLY": True,
         "SESSION_COOKIE_SAMESITE": "Lax",
         "SESSION_COOKIE_SECURE": os.environ.get("APP_ENV", local.get("APP_ENV")) == "production",
-        "SEND_MODE": "TEST",
+        "SEND_MODE": os.environ.get("SEND_MODE", local.get("SEND_MODE") or "TEST").upper(),
+        "PUBLIC_GOOGLE_SIGN_IN": os.environ.get(
+            "PUBLIC_GOOGLE_SIGN_IN", local.get("PUBLIC_GOOGLE_SIGN_IN") or ""
+        ).lower() == "true",
         "GOOGLE_CLIENT_ID": os.environ.get("GOOGLE_CLIENT_ID") or local.get("GOOGLE_CLIENT_ID"),
         "GOOGLE_CLIENT_SECRET": os.environ.get("GOOGLE_CLIENT_SECRET") or local.get("GOOGLE_CLIENT_SECRET"),
         "GMAIL_REDIRECT_URI": (

@@ -39,6 +39,21 @@ def test_sign_in_requires_configuration(app):
     assert app.test_client().get("/auth/google/start").status_code == 503
 
 
+def test_public_sign_in_accepts_verified_account_with_empty_test_list(app, monkeypatch):
+    from routes import auth
+
+    app.config.update(PUBLIC_GOOGLE_SIGN_IN=True, ALLOWED_GOOGLE_EMAILS=set())
+    client = app.test_client()
+    query = start(client)
+    monkeypatch.setattr(auth, "_exchange_identity", lambda *_: {
+        "sub": "new-student", "email": "new-student@example.test", "email_verified": True,
+        "nonce": query["nonce"][0],
+    })
+    response = client.get("/auth/google/callback", query_string={"state": query["state"][0], "code": "demo"})
+    assert response.status_code == 303
+    assert client.get("/reports/account").status_code == 200
+
+
 def test_callback_rejects_wrong_state(app):
     client = app.test_client()
     start(client)
