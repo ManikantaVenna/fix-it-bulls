@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% from "icons.html" import icon %}
+{% block title %}{{ title }} | Fix It Bulls{% endblock %}
+{% block content %}
+  <div class="page-heading tracking-heading">
+    <a class="back-link" href="{{ url_for('reports.history') }}">‹ My Reports</a>
+    <h1>{{ title }}</h1>
+    <p class="location-line">{{ icon('pin', 17) }} {{ report.building_or_area }}{% if report.room_floor_landmark %} · {{ report.room_floor_landmark }}{% endif %}</p>
+    <span class="status-pill status-{{ 'reply_received' if replies else 'sent' }}" id="tracking-status">{{ status }}</span>
+  </div>
+  <div class="tracking-grid">
+    <section class="panel timeline-panel" aria-labelledby="timeline-title">
+      <h2 id="timeline-title">Communication timeline</h2>
+      {% if sent_at %}
+        <ol class="timeline">
+          <li><strong>Email sent</strong><time data-local-time datetime="{{ sent_at }}">{{ sent_at[:16] | replace('T', ' ') }} UTC</time></li>
+        </ol>
+      {% endif %}
+      <ol class="timeline reply-list" id="reply-list">
+        {% for event in replies %}
+          <li>
+            <strong>Reply received</strong>
+            <time data-local-time datetime="{{ event.received_at }}">{{ event.received_at[:16] | replace('T', ' ') }} UTC</time>
+          </li>
+        {% endfor %}
+      </ol>
+      <div id="mail-controls" class="timeline-actions" data-csrf="{{ csrf_token() }}"
+           data-replies-url="{{ url_for('gmail.check_replies', report_id=report_id) }}">
+        {% if connected %}
+          <button class="button primary" id="check-replies" type="button" hidden>Check for replies</button>
+          <p class="hint" id="last-reply-check" hidden></p>
+        {% else %}
+          <p class="hint">Connect Gmail to check this conversation.</p>
+          <form action="{{ url_for('gmail.connect') }}" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="report_id" value="{{ report_id }}">
+            <button class="button secondary" type="submit">Connect Gmail</button>
+          </form>
+        {% endif %}
+        <p class="hint" id="mail-status" role="status" hidden></p>
+        <a id="mail-guidance" hidden>Open USF guidance</a>
+      </div>
+      <p class="repair-state"><strong>Repair status:</strong> Unknown</p>
+    </section>
+    <aside class="panel evidence" aria-labelledby="original-title">
+      <h2 id="original-title">Original report</h2>
+      <p>{{ report.description }}</p>
+      {% if report.asset_tag %}<p><strong>Equipment label:</strong> {{ report.asset_tag }}</p>{% endif %}
+      {% if report.photo_id %}
+        <img src="{{ url_for('reports.photo', report_id=report_id) }}" alt="Photo attached to the original report">
+      {% endif %}
+    </aside>
+  </div>
+{% endblock %}

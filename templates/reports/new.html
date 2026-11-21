@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "icons.html" import icon %}
 {% block title %}Report a campus issue | Fix It Bulls{% endblock %}
 {% macro field_error(name) %}
   {% if errors[name] %}<p class="field-error" id="{{ name }}-error">{{ errors[name] }}</p>{% endif %}
@@ -8,10 +9,11 @@
   {%- elif help %} aria-describedby="{{ help }}"
   {%- endif -%}
 {% endmacro %}
+{% block page_class %}page-narrow{% endblock %}
 {% block content %}
   <div class="page-heading">
     <h1>Report a campus issue</h1>
-    <p>Describe one non-urgent problem and tell us where to find it.</p>
+    <p>For non-urgent issues at USF Tampa.</p>
   </div>
   {% if errors %}
     <div class="notice error" role="alert">
@@ -22,6 +24,7 @@
     <p class="notice"><a href="{{ url_for('auth.start') }}">Sign in with Google</a> to save a report.</p>
   {% endif %}
   <form class="panel" method="post" enctype="multipart/form-data" action="{{ url_for('reports.new') }}">
+    <input type="hidden" name="analyze_now" value="1">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="field">
       <label for="description">What happened?</label>
@@ -30,12 +33,18 @@
       {{ field_error('description') }}
     </div>
     <fieldset>
-      <legend>Where is it?</legend>
+      <legend class="visually-hidden">Location</legend>
       <div class="field-grid">
         <div class="field">
           <label for="building_or_area">Building or area</label>
           <input name="building_or_area" id="building_or_area" maxlength="200" required{{ attributes('building_or_area') }}
-            value="{{ values.get('building_or_area', '') }}" placeholder="For example, Marshall Student Center">
+            value="{{ values.get('building_or_area', '') }}" list="campus-buildings" placeholder="e.g., Marshall Student Center">
+          <datalist id="campus-buildings">
+            <option value="Marshall Student Center"></option>
+            <option value="USF Tampa Library"></option>
+            <option value="Juniper-Poplar Hall"></option>
+            <option value="Engineering II"></option>
+          </datalist>
           {{ field_error('building_or_area') }}
         </div>
         <div class="field">
@@ -44,6 +53,10 @@
             value="{{ values.get('room_floor_landmark', '') }}" placeholder="For example, first floor by the elevators">
           {{ field_error('room_floor_landmark') }}
         </div>
+      </div>
+      <details class="more-details"{% if errors.site_type or errors.ownership or errors.asset_tag %} open{% endif %}>
+        <summary>More location details</summary>
+        <div class="field-grid">
         <div class="field">
           <label for="site_type">Location type</label>
           <select name="site_type" id="site_type"{{ attributes('site_type') }}>
@@ -67,18 +80,25 @@
           <input name="asset_tag" id="asset_tag" maxlength="100"{{ attributes('asset_tag') }} value="{{ values.get('asset_tag', '') }}">
           {{ field_error('asset_tag') }}
         </div>
-      </div>
+        </div>
+      </details>
     </fieldset>
     <div class="field photo-field">
-      <label for="photo">Add a photo <span>Optional</span></label>
-      <p class="hint" id="photo-help">One JPEG, PNG, or WebP image, up to 5 MB.</p>
+      <div class="photo-picker">
+        <label for="photo">
+          {{ icon('camera') }}
+          <span><strong id="photo-action">Add a photo</strong> <span id="photo-optional">(optional)</span></span>
+          {{ icon('chevron', 18) }}
+        </label>
       <input type="file" name="photo" id="photo" accept="image/jpeg,image/png,image/webp"{{ attributes('photo', 'photo-help') }}>
+      </div>
+      <p class="hint" id="photo-help">JPEG, PNG, or WebP, up to 5 MB.</p>
       {{ field_error('photo') }}
       <div class="preview" id="preview" hidden>
         <img id="preview-image" alt="Preview of the selected photo">
         <button class="button secondary" type="button" id="remove-photo">Remove photo</button>
       </div>
     </div>
-    <button class="button primary" type="submit"{% if not signed_in %} disabled{% endif %}>Save and review</button>
+    <button class="button primary" type="submit" data-pending="Analyzing report…"{% if not signed_in %} disabled{% endif %}>Analyze report</button>
   </form>
 {% endblock %}

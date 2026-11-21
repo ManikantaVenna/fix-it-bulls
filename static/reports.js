@@ -4,6 +4,8 @@ if (photoInput) {
   const preview = document.querySelector("#preview");
   const image = document.querySelector("#preview-image");
   const remove = document.querySelector("#remove-photo");
+  const action = document.querySelector("#photo-action");
+  const optional = document.querySelector("#photo-optional");
   let previewUrl;
 
   function clearPreview() {
@@ -13,6 +15,8 @@ if (photoInput) {
     }
     image.removeAttribute("src");
     preview.hidden = true;
+    action.textContent = "Add a photo";
+    optional.hidden = false;
   }
 
   photoInput.addEventListener("change", () => {
@@ -28,6 +32,8 @@ if (photoInput) {
     previewUrl = URL.createObjectURL(file);
     image.src = previewUrl;
     preview.hidden = false;
+    action.textContent = "Replace photo";
+    optional.hidden = true;
   });
 
   remove.addEventListener("click", () => {
@@ -38,20 +44,61 @@ if (photoInput) {
   });
 }
 
+const localTime = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
+
+document.querySelectorAll("time[data-local-time]").forEach((element) => {
+  const timestamp = new Date(element.dateTime);
+  if (!Number.isNaN(timestamp.getTime())) element.textContent = localTime.format(timestamp);
+});
+
+const disconnectForm = document.querySelector("#disconnect-gmail");
+if (disconnectForm) {
+  disconnectForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const button = disconnectForm.querySelector("button");
+    const errorMessage = document.querySelector("#gmail-account-error");
+    button.disabled = true;
+    errorMessage.hidden = true;
+    try {
+      const response = await fetch(disconnectForm.action, { method: "POST", body: new FormData(disconnectForm) });
+      if (!response.ok) throw new Error();
+      window.location.reload();
+    } catch {
+      errorMessage.textContent = "Gmail could not be disconnected. Try again.";
+      errorMessage.hidden = false;
+      button.disabled = false;
+    }
+  });
+}
+
+const draftText = () => `${document.querySelector("#draft-subject").value}\n\n${document.querySelector("#draft-body").value}\n`;
 const downloadDraft = document.querySelector("#download-draft");
 
 if (downloadDraft) {
   downloadDraft.hidden = false;
   downloadDraft.addEventListener("click", () => {
-    const subject = document.querySelector("#draft-subject").value;
-    const body = document.querySelector("#draft-body").value;
-    const file = new Blob([`${subject}\n\n${body}\n`], { type: "text/plain;charset=utf-8" });
+    const file = new Blob([draftText()], { type: "text/plain;charset=utf-8" });
     const link = document.createElement("a");
     const url = URL.createObjectURL(file);
     link.href = url;
     link.download = "fix-it-bulls-report.txt";
     link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+}
+
+const copyDraft = document.querySelector("#copy-draft");
+if (copyDraft && navigator.clipboard) {
+  copyDraft.hidden = false;
+  copyDraft.addEventListener("click", async () => {
+    const status = document.querySelector("#copy-status");
+    try {
+      await navigator.clipboard.writeText(draftText());
+      status.textContent = "Report copied.";
+    } catch {
+      status.textContent = "Could not copy. Download the draft instead.";
+    }
+    status.hidden = false;
   });
 }
 
@@ -179,20 +226,31 @@ if (mailControls) {
       try {
         const { replies } = await post(mailControls.dataset.repliesUrl, {});
         const list = document.querySelector("#reply-list");
-        list.replaceChildren();
+        const pill = document.querySelector("#tracking-status");
+        const lastCheck = document.querySelector("#last-reply-check");
+        if (replies.length) {
+          list.replaceChildren();
+          pill.textContent = "Reply received";
+          pill.classList.replace("status-sent", "status-reply_received");
+        }
         for (const reply of replies) {
           const item = document.createElement("li");
           const heading = document.createElement("strong");
-          heading.textContent = reply.sender;
+          heading.textContent = "Reply received";
+          const sender = document.createElement("span");
+          sender.className = "reply-sender";
+          sender.textContent = reply.sender;
           const time = document.createElement("time");
           time.dateTime = reply.received_at;
-          time.textContent = new Date(reply.received_at).toLocaleString();
+          time.textContent = localTime.format(new Date(reply.received_at));
           const message = document.createElement("p");
           message.textContent = reply.safe_text;
-          item.append(heading, time, message);
+          item.append(heading, time, sender, message);
           list.append(item);
         }
-        showStatus(replies.length ? "Reply received" : "No replies yet.");
+        lastCheck.textContent = `Last checked: ${localTime.format(new Date())}`;
+        lastCheck.hidden = false;
+        showStatus(replies.length ? "Reply received" : "No replies found in this check.");
       } catch (error) {
         showStatus(error.message);
       } finally {

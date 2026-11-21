@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% from "icons.html" import icon %}
+{% from "reports/_report_list.html" import report_list %}
+{% block title %}Fix It Bulls | Campus issue reporting{% endblock %}
+{% block content %}
+<section class="home-hero" aria-labelledby="home-heading">
+  <div class="hero-copy">
+    <p class="section-kicker"><span>USF Tampa</span></p>
+    <h1 id="home-heading">Make campus<br class="hero-break"> work better.</h1>
+    <p class="hero-description">Report a campus issue and follow its updates.</p>
+  </div>
+  <figure class="hero-image">
+    <img src="{{ url_for('static', filename='marshall-student-center.webp') }}" width="1200" height="760"
+         alt="Bronze bull statues in front of the Marshall Student Center">
+    <figcaption><a href="https://commons.wikimedia.org/wiki/File:USF_Marshall_Center_Running_of_the_Bulls.JPG">Marshall Student Center · Photo by Rick DeBow</a></figcaption>
+  </figure>
+  <div class="hero-actions">
+    <a class="button primary" href="{{ url_for('reports.new') }}">Report a problem {{ icon('arrow', 18) }}</a>
+    {% if signed_in %}<a class="quiet-link" href="{{ url_for('reports.history') }}">My Reports</a>{% endif %}
+  </div>
+</section>
+<section class="home-reports" aria-labelledby="recent-heading">
+  <div class="section-heading">
+    <h2 id="recent-heading">My Reports</h2>
+    {% if signed_in and reports %}<a href="{{ url_for('reports.history') }}">View all</a>{% endif %}
+  </div>
+  {% if reports %}
+    {{ report_list(reports, statuses) }}
+  {% elif signed_in %}
+    <p class="empty-message">Your saved campus reports will appear here.</p>
+  {% else %}
+    <p class="empty-message"><a href="{{ url_for('auth.start') }}">Sign in with Google</a> to view and track your reports.</p>
+  {% endif %}
+</section>
+{% if signed_in %}
+<section class="account-strip" aria-labelledby="gmail-heading">
+  <div class="account-summary">
+    {{ icon('mail') }}
+    <div><h2 id="gmail-heading">Gmail</h2><p>{{ "Connected" if connected else "Connect to send email reports and check for replies." }}</p></div>
+  </div>
+  {% if connected %}
+    <form method="post" action="{{ url_for('gmail.disconnect') }}" id="disconnect-gmail">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="button secondary" type="submit">Disconnect</button>
+    </form>
+  {% else %}
+    <form method="post" action="{{ url_for('gmail.connect') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="button secondary" type="submit">Connect Gmail</button>
+    </form>
+  {% endif %}
+  <p class="field-error" id="gmail-account-error" role="alert" hidden></p>
+</section>
+{% endif %}
+{% endblock %}
