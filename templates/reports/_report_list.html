@@ -1,0 +1,17 @@
+{% from "icons.html" import icon %}
+{% macro report_list(reports, statuses) %}
+  <ul class="report-list">
+    {% for row in reports %}
+      <li>
+        <a class="report-row" href="{{ url_for('reports.review', report_id=row.id) }}">
+          <span class="report-row-copy">
+            <strong>{{ row.title }}</strong>
+            <span>{{ row.location }}</span>
+          </span>
+          <span class="status-pill status-{{ row.status }}">{{ statuses.get(row.status, 'Status unavailable') }}</span>
+          {{ icon('chevron', 16) }}
+        </a>
+      </li>
+    {% endfor %}
+  </ul>
+{% endmacro %}

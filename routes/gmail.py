@@ -100,6 +100,8 @@ def connect():
             session["gmail_consent"]["report_id"] = UUID(report_id).hex
         except ValueError:
             pass
+    elif request.form.get("return_to") == "account" and "reports.account" in current_app.view_functions:
+        session["gmail_consent"]["return_to_account"] = True
     return redirect(location, code=303)
 
 
@@ -122,6 +124,8 @@ def callback():
     mail.connect_mailbox(user_id, subject, token)
     if pending.get("report_id") and "reports.review" in current_app.view_functions:
         return redirect(url_for("reports.review", report_id=pending["report_id"]), code=303)
+    if pending.get("return_to_account") and "reports.account" in current_app.view_functions:
+        return redirect(url_for("reports.account"), code=303)
     return redirect(url_for("index"), code=303)
 
 
@@ -134,6 +138,8 @@ def status():
 def disconnect():
     mail.disconnect_mailbox(_user_id())
     session.pop("gmail_consent", None)
+    if request.form.get("return_to") == "account" and "reports.account" in current_app.view_functions:
+        return redirect(url_for("reports.account"), code=303)
     return jsonify(connected=False)
 
 

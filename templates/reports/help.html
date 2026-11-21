@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Help | Fix It Bulls{% endblock %}
+{% block page_class %}page-narrow{% endblock %}
+{% block content %}
+  <div class="page-heading">
+    <h1>How reporting works</h1>
+    <p>Choose the right path for a campus issue.</p>
+  </div>
+  <div class="info-grid">
+    <section class="panel">
+      <h2>Email reports</h2>
+      <p>Add the location and an optional photo. Review the destination, message, and attachment, then approve the email.</p>
+    </section>
+    <section class="panel">
+      <h2>Official forms</h2>
+      <p>For a form route, open the USF form and submit your report there. You can download your draft from Fix It Bulls.</p>
+    </section>
+    <section class="panel">
+      <h2>Tracking a report</h2>
+      <p>Open <a href="{{ url_for('reports.history') }}">My Reports</a> to see the communication status and check for Gmail replies. A reply records a response from the inbox.</p>
+    </section>
+    <section class="panel urgent-help">
+      <h2>Urgent issues</h2>
+      <p>{{ guidance.message }}</p>
+      <p><a href="{{ guidance.official_source }}">USF emergency work request guidance</a></p>
+    </section>
+  </div>
+{% endblock %}

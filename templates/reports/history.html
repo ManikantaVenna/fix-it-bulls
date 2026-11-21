@@ -1,22 +1,19 @@
 {% extends "base.html" %}
-{% block title %}My reports | Fix It Bulls{% endblock %}
+{% from "reports/_report_list.html" import report_list %}
+{% block title %}My Reports | Fix It Bulls{% endblock %}
+{% block page_class %}page-narrow{% endblock %}
 {% block content %}
   <div class="page-heading">
-    <a class="back-link" href="{{ url_for('reports.new') }}">Report a campus issue</a>
-    <h1>My reports</h1>
+    <h1>My Reports</h1>
+    <p>Reopen a draft or follow a report you sent.</p>
   </div>
-  <section class="panel" aria-label="Saved reports">
-    {% if reports %}
-      <ul class="report-list">
-        {% for row in reports %}
-          <li>
-            <a href="{{ url_for('reports.review', report_id=row.id) }}">{{ row.location }}</a>
-            <span>{{ row.communication_status | replace('_', ' ') | capitalize }}</span>
-          </li>
-        {% endfor %}
-      </ul>
-    {% else %}
-      <p>You have no saved reports yet.</p>
-    {% endif %}
-  </section>
+  {% if reports %}
+    {{ report_list(reports, statuses) }}
+  {% else %}
+    <section class="panel empty-state">
+      <h2>No reports yet</h2>
+      <p>Your saved campus reports will appear here.</p>
+      <a class="button primary" href="{{ url_for('reports.new') }}">Report a problem</a>
+    </section>
+  {% endif %}
 {% endblock %}

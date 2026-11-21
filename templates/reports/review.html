@@ -1,13 +1,13 @@
 {% extends "base.html" %}
-{% block title %}Review your draft | Fix It Bulls{% endblock %}
+{% block title %}Review your report | Fix It Bulls{% endblock %}
 {% macro form_fields() %}
   <input type="hidden" name="report_version" value="{{ saved.version }}">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 {% endmacro %}
 {% block content %}
   <div class="page-heading">
-    <a class="back-link" href="{{ url_for('reports.new') }}">Start a new report</a>
-    <h1>Review your draft</h1>
+    <a class="back-link" href="{{ url_for('reports.history') }}">‹ My Reports</a>
+    <h1>Review your report</h1>
     <p>{{ report.building_or_area }}{% if report.room_floor_landmark %} · {{ report.room_floor_landmark }}{% endif %}</p>
   </div>
   {% if error %}<p class="notice error" role="alert">{{ error }}</p>{% endif %}
@@ -22,7 +22,13 @@
         <label for="draft-body">Message</label>
         <textarea id="draft-body" rows="10">{{ body }}</textarea>
       </div>
-      <button type="button" class="button secondary" id="download-draft" hidden>Download draft</button>
+      <div class="draft-actions">
+        {% if route and route.state == "ready_handoff" %}
+          <button type="button" class="button secondary" id="copy-draft" hidden>Copy report</button>
+          <p id="copy-status" class="hint" role="status" hidden></p>
+        {% endif %}
+        <button type="button" class="button secondary" id="download-draft" hidden>Download draft</button>
+      </div>
       <div id="mail-controls"
            data-csrf="{{ csrf_token() }}"
            data-review-url="{{ url_for('gmail.email_review', report_id=report_id) }}"
@@ -38,14 +44,12 @@
             <h3 id="preview-heading">Confirm test email</h3>
             <dl id="email-details"></dl>
             <pre id="email-body"></pre>
-            <button type="button" class="button primary" id="send-email">Send report</button>
+            {% if report.photo_id %}
+              <img class="email-attachment" src="{{ url_for('reports.photo', report_id=report_id) }}"
+                   alt="Photo that will be attached to the email">
+            {% endif %}
+            <button type="button" class="button primary" id="send-email">Confirm &amp; send</button>
           </section>
-        {% elif saved.communication_status in ("sent", "reply_received") %}
-          <p><strong>{{ "Reply received" if saved.communication_status == "reply_received" else "Sent" }}</strong></p>
-          {% if connected %}
-            <button type="button" class="button primary" id="check-replies" hidden>Check for replies</button>
-            <ul class="reply-list" id="reply-list"></ul>
-          {% endif %}
         {% elif locked %}
           <p class="notice">Delivery needs verification. Check the original message in your Gmail Sent folder.</p>
         {% endif %}
@@ -62,6 +66,9 @@
       {% elif not locked %}
         {% if route %}
           <div class="report-option">
+            {% if route.state == "ready_email" %}<span class="status-pill status-sent">Verified route</span>
+            {% elif route.state == "ready_handoff" %}<span class="status-pill status-prepared">Official form</span>
+            {% elif route.state == "needs_details" %}<span class="status-pill status-prepared">Needs details</span>{% endif %}
             {% if destination %}<h3>{{ destination.name }}</h3>{% endif %}
             <p>{{ route.reason }}</p>
             {% if route.state == "ready_email" %}
@@ -153,7 +160,7 @@
           <button class="button secondary" type="submit">Connect Gmail</button>
         </form>
       {% endif %}
-      <h2>Original report</h2>
+      <details class="original-report"><summary>Original report</summary>
       <dl>
         <dt>Location</dt>
         <dd>{{ report.building_or_area }}{% if report.room_floor_landmark %}<br>{{ report.room_floor_landmark }}{% endif %}</dd>
@@ -167,6 +174,7 @@
       {% if report.photo_id %}
         <img src="{{ url_for('reports.photo', report_id=report_id) }}" alt="Photo attached to the original report">
       {% endif %}
+      </details>
     </aside>
   </div>
 {% endblock %}

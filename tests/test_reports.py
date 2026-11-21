@@ -101,6 +101,32 @@ def test_requires_real_authentication_and_csrf(reporting_app):
     assert client.post("/reports/new", data=fields).status_code == 400
 
 
+def test_home_and_help_are_public_and_account_is_private(reporting_app):
+    app, owner, other = reporting_app
+    client = app.test_client()
+    home = client.get("/", follow_redirects=True)
+    assert home.status_code == 200
+    assert "Make campus" in home.text and "Report an issue" in home.text
+    assert "/reports/help" in home.text
+    help_page = client.get("/reports/help")
+    assert help_page.status_code == 200
+    assert "Urgent issues" in help_page.text
+    assert client.get("/reports/account").location.endswith("/auth/google/start")
+    sign_in(client, owner)
+    account = client.get("/reports/account")
+    assert "first@example.test" in account.text and "second@example.test" not in account.text
+    assert "Connect Gmail" in account.text
+    with app.app_context():
+        mail.connect_mailbox(owner, "first-test-owner", "fixture-only")
+    token = client.get("/api/csrf").json["csrf_token"]
+    assert "Disconnect Gmail" in client.get("/reports/account").text
+    disconnected = client.post("/gmail/disconnect", data={"csrf_token": token, "return_to": "account"})
+    assert disconnected.location.endswith("/reports/account")
+    assert "Connect Gmail" in client.get("/reports/account").text
+    sign_in(client, other)
+    assert "first@example.test" not in client.get("/reports/account").text
+
+
 def test_invalid_photo_keeps_form_text_and_allows_text_only(reporting_app):
     app, owner, _ = reporting_app
     client = app.test_client()
@@ -118,6 +144,43 @@ def test_invalid_photo_keeps_form_text_and_allows_text_only(reporting_app):
     report_id = result.location.split("/")[-2]
     with app.app_context():
         assert get_report(owner, report_id)["report"]["photo_id"] is None
+
+
+def test_dashboard_and_history_show_only_the_signed_in_users_reports(reporting_app):
+    app, owner, other = reporting_app
+    client = app.test_client()
+    visitor = client.get("/", follow_redirects=True)
+    assert "Make campus" in visitor.text
+    assert client.get("/static/marshall-student-center.webp").mimetype == "image/webp"
+    sign_in(client, owner)
+    fields = report_fields(client)
+    client.post("/reports/new", data=fields)
+    assert escape(fields["description"]) in client.get("/reports/home").text
+    assert escape(fields["description"]) in client.get("/reports").text
+    sign_in(client, other)
+    assert escape(fields["description"]) not in client.get("/reports/home").text
+    assert "No reports yet" in client.get("/reports").text
+
+
+@pytest.mark.parametrize("available", [True, False])
+def test_analyze_button_saves_the_report_before_analysis(reporting_app, monkeypatch, available):
+    app, owner, _ = reporting_app
+    client = app.test_client()
+    sign_in(client, owner)
+
+    def analyze(*args):
+        if not available:
+            raise AIUnavailableError
+        return AnalysisOutput(suggested_issue_type="computer_av", proposed_title="Display issue"), None
+
+    monkeypatch.setattr("routes.reports.triage", analyze)
+    created = client.post("/reports/new", data={**report_fields(client), "analyze_now": "1"})
+    assert created.status_code == 303
+    details = client.get(created.location)
+    assert ("USF IT" if available else "Your report is saved") in details.text
+    with app.app_context():
+        report = get_report(owner, created.location.split("/")[-2])
+        assert report["report"]["building_or_area"] == "Engineering II"
 
 
 @pytest.mark.parametrize("issue_type, site_type, urgent, expected", [
@@ -184,7 +247,9 @@ def test_manual_fallback_gets_verified_preview_and_reply_through_report_flow(rep
         "approved_version": preview.json["report_version"], "approval_id": preview.json["approval_id"],
     })
     assert sent.json["state"] == "sent"
-    assert "Check for replies" in client.get(created.location).text
+    tracking = client.get(created.location).text
+    assert "Communication timeline" in tracking and "Check for replies" in tracking
+    assert "Email sent" in tracking and "Repair status:" in tracking
     assert "Engineering II" in client.get("/reports").text
     messages = [
         {"id": "out", "internalDate": "1795291200000", "labelIds": ["SENT"]},

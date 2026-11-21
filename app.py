@@ -30,8 +30,8 @@ def create_app(config=None):
 
     @app.get("/")
     def index():
-        if "reports.new" in app.view_functions:
-            return redirect(url_for("reports.new"))
+        if "reports.dashboard" in app.view_functions:
+            return redirect(url_for("reports.dashboard"))
         return jsonify(
             project="Fix It Bulls",
             stage="Shared foundation; feature modules are pending.",

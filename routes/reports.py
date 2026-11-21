@@ -1,6 +1,6 @@
 from typing import get_args
 
-from flask import Blueprint, Response, abort, redirect, render_template, request, session, url_for
+from flask import Blueprint, Response, abort, flash, get_flashed_messages, redirect, render_template, request, session, url_for
 from pydantic import ValidationError
 from werkzeug.exceptions import RequestEntityTooLarge
 
@@ -9,7 +9,7 @@ from schemas import AnalysisOutput, IssueType, ReportInput
 from services.ai import AIUnavailableError
 from services.mail import LOCKED_STATES, mailbox_connected
 from services.research import display_sources, research_channel
-from services.routing import get_route, resolve_route, route_for_analysis, triage
+from services.routing import get_route, resolve_route, route_for_analysis, triage, urgent_guidance
 from services.storage import read_photo, save_photo
 from services.urgency import has_urgent_text
 
@@ -28,6 +28,13 @@ ISSUE_LABELS = {
     "access_barrier": "Physical access barrier", "dining_feedback": "Dining", "library_service": "Library service",
     "other": "Other",
 }
+COMMUNICATION_LABELS = {
+    "prepared": "Draft", "sending": "Sending", "sent": "Email sent",
+    "reply_received": "Reply received", "send_failed": "Send failed", "send_unknown": "Delivery unconfirmed",
+    "ready_email": "Ready to review", "ready_handoff": "Form required",
+    "needs_details": "Needs details", "research_available": "Research available",
+    "urgent_guidance": "Urgent guidance", "unsupported": "Outside scope",
+}
 
 
 def signed_in_user():
@@ -37,6 +44,56 @@ def signed_in_user():
         return None
     user = get_db().execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
     return user_id if user else None
+
+
+def report_rows(user_id, limit=-1):
+    rows = get_db().execute(
+        """SELECT r.id, COALESCE(NULLIF(json_extract(a.analysis_json, '$.proposed_title'), ''),
+                   substr(json_extract(r.report_json, '$.description'), 1, 95)) AS title,
+                   json_extract(r.report_json, '$.building_or_area') AS location,
+                   r.communication_status, r.report_json, a.analysis_json,
+                   EXISTS (SELECT 1 FROM urgent_report_versions AS u
+                           WHERE u.report_id=r.id AND u.version=r.version) AS flagged_urgent
+           FROM reports AS r
+           LEFT JOIN report_analysis AS a ON a.report_id=r.id AND a.version=r.version
+           WHERE r.user_id=? ORDER BY r.created_at DESC, r.id DESC LIMIT ?""", (user_id, limit),
+    ).fetchall()
+    result = []
+    for row in rows:
+        label = row["communication_status"]
+        if label == "prepared":
+            report = ReportInput.model_validate_json(row["report_json"])
+            analysis = AnalysisOutput.model_validate_json(row["analysis_json"]) if row["analysis_json"] else None
+            route = report_route({"analysis": analysis, "flagged_urgent": row["flagged_urgent"]}, report)
+            if route:
+                label = route.state
+        result.append({"id": row["id"], "title": row["title"], "location": row["location"],
+                       "status": label})
+    return result
+
+
+@bp.get("/home")
+def dashboard():
+    user_id = signed_in_user()
+    return render_template(
+        "reports/dashboard.html", signed_in=bool(user_id),
+        reports=report_rows(user_id, 3) if user_id else [],
+        statuses=COMMUNICATION_LABELS,
+    )
+
+
+@bp.get("/help")
+def help_page():
+    return render_template("reports/help.html", guidance=urgent_guidance())
+
+
+@bp.get("/account")
+def account():
+    user_id = signed_in_user()
+    if user_id is None:
+        return redirect(url_for("auth.start"))
+    email = get_db().execute("SELECT email FROM users WHERE id=?", (user_id,)).fetchone()["email"]
+    return render_template("reports/account.html", email=email, connected=mailbox_connected(user_id))
 
 
 def show_form(values=None, errors=None, *, user_id=None, status=200):
@@ -75,6 +132,12 @@ def new():
         report = ReportInput.model_validate({**report.model_dump(), "photo_id": photo_id})
 
     report_id = create_report(user_id, report)
+    if request.form.get("analyze_now") and not has_urgent_text(report.description):
+        saved = get_report(user_id, report_id)
+        try:
+            save_analysis(user_id, saved, run_analysis(user_id, report))
+        except (AIUnavailableError, LookupError, OSError):
+            flash("Analysis is unavailable. Your report is saved. Choose a category to continue.", "analysis")
     return redirect(url_for("reports.review", report_id=report_id), code=303)
 
 
@@ -100,7 +163,29 @@ def owned_report(report_id):
 @bp.get("/<report_id>/review")
 def review(report_id):
     user_id, saved = owned_report(report_id)
-    return review_page(user_id, saved)
+    if saved["communication_status"] in {"sent", "reply_received"}:
+        return tracking_page(user_id, saved)
+    messages = get_flashed_messages(category_filter=["analysis"])
+    return review_page(user_id, saved, error=messages[0] if messages else None)
+
+
+def tracking_page(user_id, saved):
+    report = ReportInput.model_validate(saved["report"])
+    attempt = get_db().execute(
+        "SELECT id, sent_at FROM gmail_attempts WHERE report_id=? AND state='sent' ORDER BY sent_at DESC LIMIT 1",
+        (saved["id"],),
+    ).fetchone()
+    replies = get_db().execute(
+        "SELECT received_at FROM gmail_reply_refs WHERE attempt_id=? ORDER BY received_at, message_id",
+        (attempt["id"],),
+    ).fetchall() if attempt else []
+    analysis = saved["analysis"]
+    return render_template(
+        "reports/tracking.html", report=report, report_id=saved["id"],
+        title=analysis.proposed_title if analysis and analysis.proposed_title else f"Campus issue at {report.building_or_area}",
+        status=COMMUNICATION_LABELS[saved["communication_status"]],
+        sent_at=attempt["sent_at"] if attempt else None, replies=replies, connected=mailbox_connected(user_id),
+    )
 
 
 def report_route(saved, report):
@@ -144,6 +229,19 @@ def editable_report(report_id):
     return user_id, saved
 
 
+def run_analysis(user_id, report):
+    photo_bytes = read_photo(user_id, report.photo_id) if report.photo_id else None
+    analysis, _ = triage(report, photo_bytes)
+    return analysis
+
+
+def save_analysis(user_id, saved, analysis):
+    report_id, version = saved["id"], saved["version"]
+    record_urgent_analysis(user_id, report_id, version, analysis)
+    if not save_report_analysis(user_id, report_id, version, analysis):
+        abort(409, "The report changed while it was being analyzed.")
+
+
 @bp.post("/<report_id>/analyze")
 def analyze(report_id):
     user_id, saved = editable_report(report_id)
@@ -164,20 +262,16 @@ def analyze(report_id):
 
     if saved["flagged_urgent"] or has_urgent_text(report.description, *report.clarification_answers.values()):
         return redirect(url_for("reports.review", report_id=report_id), code=303)
-    version = saved["version"]
     if classified:
         if classified not in get_args(IssueType):
             abort(400)
         analysis = AnalysisOutput(suggested_issue_type=classified)
     else:
         try:
-            photo_bytes = read_photo(user_id, report.photo_id) if report.photo_id else None
-            analysis, _ = triage(report, photo_bytes)
+            analysis = run_analysis(user_id, report)
         except (AIUnavailableError, LookupError, OSError):
             return review_page(user_id, saved, error="Analysis is unavailable. You can choose a category below.", status=503)
-    record_urgent_analysis(user_id, report_id, version, analysis)
-    if not save_report_analysis(user_id, report_id, version, analysis):
-        abort(409, "The report changed while it was being analyzed.")
+    save_analysis(user_id, saved, analysis)
     return redirect(url_for("reports.review", report_id=report_id), code=303)
 
 
@@ -214,11 +308,7 @@ def history():
     user_id = signed_in_user()
     if user_id is None:
         return redirect(url_for("auth.start"))
-    rows = get_db().execute(
-        "SELECT id, json_extract(report_json, '$.building_or_area') AS location, communication_status "
-        "FROM reports WHERE user_id=? ORDER BY created_at DESC", (user_id,),
-    ).fetchall()
-    return render_template("reports/history.html", reports=rows)
+    return render_template("reports/history.html", reports=report_rows(user_id), statuses=COMMUNICATION_LABELS)
 
 
 @bp.get("/<report_id>/photo")
