@@ -15,7 +15,9 @@ from pydantic import BaseModel, ValidationError
 from schemas import AnalysisOutput, IssueType, ReportInput
 from services.urgency import has_urgent_text
 
-DEFAULT_MODEL = "gemini-3.8-flash"  # 2.5 models are closed to new API keys
+# 2.5 models are closed to new API keys. On 2026-11-21, 3.5 and 3.6 answered in
+# about 2s while 3.8 and 3.7 were timing out, so the fast ones go first.
+DEFAULT_MODEL = "gemini-3.5-flash"
 ROOT = Path(__file__).resolve().parent.parent
 
 ISSUE_TYPE_GUIDE = """
@@ -73,8 +75,16 @@ def model_name() -> str:
 
 # Tried in order when the preferred model is overloaded, rate-limited or retired.
 # Override with GEMINI_FALLBACK_MODELS=model-a,model-b in .env.
-FALLBACK_MODELS = ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"]
+FALLBACK_MODELS = ["gemini-3.6-flash", "gemini-3.8-flash", "gemini-3.7-flash"]
 RETRYABLE_CODES = {404, 429, 500, 503, 504}
+
+
+def is_retryable(exc: Exception) -> bool:
+    """Busy, rate-limited, retired, or our own request timeout: worth trying another model."""
+    if getattr(exc, "code", None) in RETRYABLE_CODES:
+        return True
+    # httpx raises ReadTimeout/ConnectTimeout when our per-request time cap is hit.
+    return isinstance(exc, TimeoutError) or "timeout" in type(exc).__name__.lower()
 QUICK_TIMEOUT_MS = 15_000  # busy models often hang ~60s before failing; move on sooner
 LAST_TIMEOUT_MS = 45_000
 
@@ -92,7 +102,7 @@ def http_options(timeout_ms: int = 45_000):
     return types.HttpOptions(timeout=timeout_ms, retry_options=types.HttpRetryOptions(attempts=1))
 
 
-def generate(client, contents, config, *, models: list[str] | None = None):
+def generate(client, contents, config, *, models: list[str] | None = None, quick_timeout_ms: int = QUICK_TIMEOUT_MS):
     """generate_content with model fallback. Raises the last error if every model fails.
 
     Each model but the last gets a short time window, so one overloaded model
@@ -101,12 +111,12 @@ def generate(client, contents, config, *, models: list[str] | None = None):
     models = models or list(dict.fromkeys([model_name(), *fallback_models()]))
     last_error = None
     for i, name in enumerate(models):
-        timeout = LAST_TIMEOUT_MS if i == len(models) - 1 else QUICK_TIMEOUT_MS
+        timeout = LAST_TIMEOUT_MS if i == len(models) - 1 else quick_timeout_ms
         attempt_config = config.model_copy(update={"http_options": http_options(timeout)}) if config else config
         try:
             return client.models.generate_content(model=name, contents=contents, config=attempt_config)
         except Exception as exc:
-            if getattr(exc, "code", None) not in RETRYABLE_CODES:
+            if not is_retryable(exc):
                 raise
             last_error = exc
     raise last_error
