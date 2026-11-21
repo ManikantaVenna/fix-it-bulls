@@ -102,7 +102,8 @@ def http_options(timeout_ms: int = 45_000):
     return types.HttpOptions(timeout=timeout_ms, retry_options=types.HttpRetryOptions(attempts=1))
 
 
-def generate(client, contents, config, *, models: list[str] | None = None, quick_timeout_ms: int = QUICK_TIMEOUT_MS):
+def generate(client, contents, config, *, models: list[str] | None = None,
+             quick_timeout_ms: int = QUICK_TIMEOUT_MS, last_timeout_ms: int = LAST_TIMEOUT_MS):
     """generate_content with model fallback. Raises the last error if every model fails.
 
     Each model but the last gets a short time window, so one overloaded model
@@ -111,7 +112,7 @@ def generate(client, contents, config, *, models: list[str] | None = None, quick
     models = models or list(dict.fromkeys([model_name(), *fallback_models()]))
     last_error = None
     for i, name in enumerate(models):
-        timeout = LAST_TIMEOUT_MS if i == len(models) - 1 else quick_timeout_ms
+        timeout = last_timeout_ms if i == len(models) - 1 else quick_timeout_ms
         attempt_config = config.model_copy(update={"http_options": http_options(timeout)}) if config else config
         try:
             return client.models.generate_content(model=name, contents=contents, config=attempt_config)

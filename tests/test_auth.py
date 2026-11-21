@@ -48,6 +48,50 @@ def test_callback_rejects_wrong_state(app):
         assert "user_id" not in session
 
 
+def test_overlapping_attempts_do_not_replace_each_other_and_cannot_move_browsers(app, monkeypatch):
+    from routes import auth
+
+    browser = app.test_client()
+    first = start(browser)
+    later = start(browser)
+    callbacks = []
+
+    def exchange(code, pending):
+        callbacks.append(pending["state"])
+        query = first if code == "first" else later
+        return {"nonce": query["nonce"][0], "sub": "student", "email": "student@example.test",
+                "email_verified": True}
+
+    monkeypatch.setattr(auth, "_exchange_identity", exchange)
+    path = "/auth/google/callback"
+    first_params = {"state": first["state"][0], "code": "first"}
+    wrong_browser = app.test_client().get(path, query_string=first_params)
+    assert wrong_browser.status_code == 400
+    assert "Try Google sign-in again" in wrong_browser.text
+    assert browser.get(path, query_string=first_params).status_code == 303
+    assert browser.get(path, query_string={"state": later["state"][0], "code": "later"}).status_code == 303
+    assert browser.get(path, query_string=first_params).status_code == 400
+    assert callbacks == [first["state"][0], later["state"][0]]
+
+
+def test_expired_browser_attempt_returns_retry_page(app, monkeypatch):
+    from routes import auth
+
+    app.config["SESSION_COOKIE_SECURE"] = True
+    browser = app.test_client()
+    now = 1_000
+    monkeypatch.setattr(auth.time, "time", lambda: now)
+    response = browser.get("/auth/google/start", base_url="https://preview.example.test")
+    state = parse_qs(urlparse(response.location).query)["state"][0]
+    cookie = response.headers["Set-Cookie"]
+    assert all(value in cookie for value in ("Secure", "HttpOnly", "SameSite=Lax", "Path=/auth/google/callback"))
+    now += 601
+    response = browser.get("/auth/google/callback", base_url="https://preview.example.test",
+                           query_string={"state": state, "code": "expired"})
+    assert response.status_code == 400
+    assert "Try Google sign-in again" in response.text
+
+
 @pytest.mark.parametrize("mode", ["allowed", "wrong_nonce", "not_allowlisted", "unverified"])
 def test_callback_validates_identity_before_starting_session(app, monkeypatch, mode):
     from routes import auth

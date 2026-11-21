@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, ValidationError
 
 from schemas import IssueType, ReportInput, ResearchResult
-from services.ai import AIUnavailableError, generate, get_client, http_options, is_retryable, model_name
+from services.ai import AIUnavailableError, generate, get_client, is_retryable, model_name
 
 OFFICIAL_DOMAIN = "usf.edu"
 SUCCESS = "URL_RETRIEVAL_STATUS_SUCCESS"
@@ -98,8 +98,28 @@ def _parse_finding(text: str) -> _Finding:
 
 
 def _is_official(url: str) -> bool:
-    host = (urlparse(url).hostname or "").lower()
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    return parsed.scheme == "https" and not parsed.username and _is_usf_domain(parsed.hostname or "")
+
+
+def _is_usf_domain(host: str) -> bool:
     return host == OFFICIAL_DOMAIN or host.endswith("." + OFFICIAL_DOMAIN)
+
+
+def _is_google_citation(url: str, title: str) -> bool:
+    if not _is_usf_domain(title):
+        return False
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    return (
+        parsed.scheme == "https" and parsed.netloc == "vertexaisearch.cloud.google.com"
+        and parsed.path.startswith("/grounding-api-redirect/")
+    )
 
 
 def _evidence(candidate) -> tuple[list[str], dict]:
@@ -114,7 +134,7 @@ def _evidence(candidate) -> tuple[list[str], dict]:
         title = (getattr(web, "title", "") or "").lower()
         chunks.append({"title": getattr(web, "title", ""), "uri": web.uri})
         # Grounding URIs are Google redirect links; the title carries the site's domain.
-        if _is_official(web.uri) or title == OFFICIAL_DOMAIN or title.endswith("." + OFFICIAL_DOMAIN):
+        if _is_official(web.uri) or _is_google_citation(web.uri, title):
             links.append(web.uri)
     ucm = getattr(candidate, "url_context_metadata", None)
     for meta in (getattr(ucm, "url_metadata", None) or []):
@@ -152,26 +172,26 @@ def research_channel(report: ReportInput, *, issue_type: str = "other", client=N
 
         client = client or get_client()
 
-        def ask(prompt, tools, models=None, quick_timeout_ms=15_000):
-            config = types.GenerateContentConfig(tools=tools, temperature=0.2, http_options=http_options(60_000))
-            return generate(client, prompt, config, models=models, quick_timeout_ms=quick_timeout_ms)
+        def ask(prompt, tools, models, timeout_ms):
+            config = types.GenerateContentConfig(tools=tools, temperature=0.2)
+            return generate(client, prompt, config, models=models, quick_timeout_ms=timeout_ms,
+                            last_timeout_ms=timeout_ms)
 
         try:
             # Quota errors apply to the whole key, so web search tries one model only.
             response = ask(_prompt(context), [
                 types.Tool(google_search=types.GoogleSearch()),
                 types.Tool(url_context=types.UrlContext()),
-            ], models=[model_name()])
+            ], models=[model_name()], timeout_ms=25_000)
         except Exception as exc:
             if not is_retryable(exc):
                 raise
             # Web search has no quota, is busy or timed out: read known official pages instead.
             pages = seed_pages(issue_type)
-            # Reading pages takes longer than a plain answer (about 10-60s live), so
-            # each model gets 45s and only the two fastest models are tried.
+            # Keep the configured request timeouts below the shared preview's proxy timeout.
             response = ask(
                 _prompt(context, pages), [types.Tool(url_context=types.UrlContext())],
-                models=list(dict.fromkeys([model_name(), "gemini-3.6-flash"])), quick_timeout_ms=45_000,
+                models=list(dict.fromkeys([model_name(), "gemini-3.6-flash"])), timeout_ms=40_000,
             )
             notes.append(f"Web search was unavailable, so only {len(pages)} official USF page(s) were checked.")
     except AIUnavailableError:

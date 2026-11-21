@@ -33,6 +33,13 @@ def init_db():
             google_sub TEXT NOT NULL UNIQUE,
             email TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS google_sign_in_attempts (
+            state TEXT PRIMARY KEY,
+            browser_digest TEXT NOT NULL,
+            nonce TEXT NOT NULL,
+            code_verifier TEXT NOT NULL,
+            expires_at INTEGER NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS photos (
             id TEXT PRIMARY KEY,
             user_id TEXT NOT NULL REFERENCES users(id),
@@ -89,6 +96,27 @@ def init_db():
             PRIMARY KEY (attempt_id, message_id)
         );
     """)
+
+
+def store_google_sign_in(state, browser_digest, nonce, code_verifier, *, now, expires_at):
+    db = get_db()
+    with db:
+        db.execute("DELETE FROM google_sign_in_attempts WHERE expires_at <= ?", (now,))
+        db.execute(
+            "INSERT INTO google_sign_in_attempts(state,browser_digest,nonce,code_verifier,expires_at) "
+            "VALUES(?,?,?,?,?)",
+            (state, browser_digest, nonce, code_verifier, expires_at),
+        )
+
+
+def consume_google_sign_in(state, browser_digest, *, now):
+    db = get_db()
+    with db:
+        return db.execute(
+            "DELETE FROM google_sign_in_attempts WHERE state=? AND browser_digest=? AND expires_at>? "
+            "RETURNING state, nonce, code_verifier",
+            (state, browser_digest, now),
+        ).fetchone()
 
 
 def upsert_user(google_sub, email):

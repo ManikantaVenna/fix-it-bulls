@@ -12,7 +12,7 @@ from oauthlib.oauth2 import OAuth2Error
 from pydantic import Field, ValidationError
 from requests import RequestException
 
-from routes.auth import IDENTITY_SCOPES, _flow
+from routes.auth import IDENTITY_SCOPES, _flow, oauth_problem
 from schemas import Contract, IssueType
 from services import mail
 from services.gmail_client import GMAIL_SCOPES
@@ -63,6 +63,13 @@ def exchange_consent(code, pending):
 
 @bp.errorhandler(mail.MailError)
 def _mail_error(error):
+    if request.endpoint in {"gmail.connect", "gmail.callback"}:
+        if error.status == 401:
+            return oauth_problem("Sign in to connect Gmail", "Once signed in, open Account to connect Gmail.", 401)
+        return oauth_problem(
+            "Gmail connection didn’t finish", str(error), error.status,
+            retry_endpoint="reports.account", retry_label="Back to Account",
+        )
     return jsonify(error=str(error)), error.status
 
 

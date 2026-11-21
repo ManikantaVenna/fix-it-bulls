@@ -26,7 +26,8 @@ FINDING = {
 }
 
 
-def response(finding=FINDING, chunks=(("usf.edu", "https://vertexaisearch.example/redirect/1"),), urls=()):
+def response(finding=FINDING, chunks=(("usf.edu", "https://vertexaisearch.cloud.google.com/grounding-api-redirect/1"),),
+             urls=()):
     gm = NS(
         grounding_chunks=[NS(web=NS(title=t, uri=u)) for t, u in chunks],
         web_search_queries=["USF Bull Runner report problem"],
@@ -103,6 +104,13 @@ def test_failed_url_retrieval_is_not_cited():
                     urls=[("https://www.usf.edu/gone", "URL_RETRIEVAL_STATUS_ERROR")])
     out = research_channel(report(), client=FakeClient(resp))
     assert out.status == "insufficient_evidence"
+
+
+def test_usf_title_does_not_make_an_arbitrary_or_malformed_link_official():
+    resp = response(chunks=(("usf.edu", "https://example.test/report"), ("usf.edu", "https://[/")))
+    out = research_channel(report(), client=FakeClient(resp))
+    assert out.status == "insufficient_evidence"
+    assert out.supporting_source_links == []
 
 
 def test_conflicting_sources_are_reported():
