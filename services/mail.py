@@ -16,6 +16,7 @@ from db import get_db, get_report
 from schemas import IssueType, ReportInput, SendOutcome
 from services import gmail_client
 from services.storage import read_photo
+from services.urgency import has_urgent_text
 
 LOCKED_STATES = {"sending", "sent", "send_unknown", "reply_received"}
 ISSUE_TYPE = TypeAdapter(IssueType)
@@ -25,6 +26,19 @@ class MailError(ValueError):
     def __init__(self, message, status=409):
         super().__init__(message)
         self.status = status
+
+
+class UrgentReportError(MailError):
+    def __init__(self):
+        super().__init__("This report may be urgent. If anyone is in immediate danger, call 911.")
+
+
+def _require_routine_report(report, subject, body):
+    fields = report["report"]
+    if report["flagged_urgent"] or has_urgent_text(
+        fields["description"], *fields["clarification_answers"].values(), subject, body,
+    ):
+        raise UrgentReportError()
 
 
 def _cipher():
@@ -89,6 +103,8 @@ def _resolve_route(report, issue_type):
 
 def _verified_route(report, issue_type):
     route = _resolve_route(report, issue_type)
+    if route.state == "urgent_guidance":
+        raise UrgentReportError()
     if route.state != "ready_email" or not route.route_id or not route.official_source:
         raise MailError("This report needs a verified email route before sending.")
     return route.model_dump(mode="json")
@@ -132,6 +148,7 @@ def prepare_email_review(user_id, report_id, report_version, issue_type, subject
     report = _report(user_id, report_id)
     if report["version"] != report_version or report["communication_status"] in LOCKED_STATES:
         raise MailError("The report changed or already has an outbound email.")
+    _require_routine_report(report, subject, body)
     _refresh_token(user_id)
     try:
         ISSUE_TYPE.validate_python(issue_type)
@@ -155,6 +172,8 @@ def prepare_email_review(user_id, report_id, report_version, issue_type, subject
         latest = _report(user_id, report_id)
         if latest["version"] != report_version or latest["communication_status"] in LOCKED_STATES:
             raise MailError("The report changed while preparing the email. Review it again.")
+        if latest["flagged_urgent"]:
+            raise UrgentReportError()
         db.execute(
             "INSERT INTO gmail_reviews(report_id,id,version,snapshot_json) VALUES(?,?,?,?) "
             "ON CONFLICT(report_id) DO UPDATE SET id=excluded.id,version=excluded.version,snapshot_json=excluded.snapshot_json",
@@ -190,6 +209,7 @@ def send_approved_report(user_id, report_id, approved_version, *, approval_id):
         if report["communication_status"] in LOCKED_STATES:
             raise MailError("This report already has an outbound email attempt.")
         snapshot = json.loads(review["snapshot_json"])
+        _require_routine_report(report, snapshot["subject"], snapshot["body"])
         photo = _photo(user_id, report["report"])
         if (
             snapshot["route"] != _verified_route(report["report"], snapshot["issue_type"])

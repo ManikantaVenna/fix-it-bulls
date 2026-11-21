@@ -10,7 +10,7 @@ from PIL import Image
 
 from app import create_app
 from db import create_report, get_db, get_report, update_report, upsert_user
-from schemas import RoutingOutput
+from schemas import AnalysisOutput, RoutingOutput
 from services import mail
 from services.gmail_client import GMAIL_SCOPES, DeliveryUncertain
 from services.storage import save_photo
@@ -95,6 +95,54 @@ def test_review_only_uses_maintained_routes(setup, monkeypatch):
         connect(owner)
         with pytest.raises(mail.MailError, match="verified email route"):
             preview(owner, report)
+
+
+@pytest.mark.parametrize(
+    "changes, subject, body",
+    [
+        ({"description": "I smell gas and see sparks by the panel."}, "Fixture", "Check the fixture."),
+        ({"clarification_answers": {"What changed?": "The panel is smoking."}}, "Fixture", "Check the fixture."),
+        ({}, "Fixture", "There is a live wire by the panel."),
+    ],
+)
+def test_urgent_text_blocks_http_review_even_with_a_routine_category(setup, changes, subject, body):
+    app, owner, _, report = setup
+    with app.app_context():
+        connect(owner)
+        version = update_report(owner, report, changes)["version"] if changes else 1
+    client = app.test_client()
+    with client.session_transaction() as state:
+        state["user_id"] = owner
+    csrf = client.get("/api/csrf").json["csrf_token"]
+    response = client.post(f"/reports/{report}/email-review", json={
+        "report_version": version, "issue_type": "plumbing", "subject": subject, "body": body,
+    }, headers={"X-CSRFToken": csrf})
+    assert response.status_code == 409
+    assert response.json["code"] == "urgent_guidance"
+    with app.app_context():
+        assert get_db().execute("SELECT COUNT(*) FROM gmail_reviews").fetchone()[0] == 0
+
+
+def test_saved_urgent_analysis_blocks_existing_approval_and_is_version_scoped(setup, monkeypatch):
+    from db import record_urgent_analysis
+
+    app, owner, stranger, report = setup
+    monkeypatch.setattr(mail.gmail_client, "send_message", lambda *args: pytest.fail("Urgent report reached Gmail"))
+    urgent = AnalysisOutput(possible_urgent_concern=True)
+    with app.app_context():
+        connect(owner)
+        draft = preview(owner, report)
+        assert not record_urgent_analysis(stranger, report, 1, urgent)
+        assert record_urgent_analysis(owner, report, 1, urgent)
+        assert not record_urgent_analysis(owner, report, 1, AnalysisOutput())
+        with pytest.raises(mail.MailError, match="urgent"):
+            send(owner, report, draft)
+        with pytest.raises(mail.MailError, match="urgent"):
+            preview(owner, report)
+        assert get_db().execute("SELECT COUNT(*) FROM gmail_attempts").fetchone()[0] == 0
+        version = update_report(owner, report, {"description": "Fixture drips slowly."})["version"]
+        assert not record_urgent_analysis(owner, report, 1, urgent)
+        assert mail.prepare_email_review(owner, report, version, "plumbing", "Fixture", "Fixture drips.")["approval_id"]
 
 
 def test_edited_report_cannot_send_stale_preview(setup):

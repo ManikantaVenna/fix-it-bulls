@@ -69,6 +69,8 @@ All endpoints require a signed-in session. For POST requests, include a form CSR
 
 Show the exact sender, test inbox, subject, message and attachment returned by the server. Open a new review after edits, including draft text edits. Call approve-send only when the user presses **Send report**. For `send_failed`, open a new review before another attempt. If delivery is uncertain, direct the user to verify in Gmail and keep the report locked. Render `safe_text` and sender names as text. Reply bodies stay in Gmail.
 
+Preview and send both return HTTP 409 with `code: "urgent_guidance"`, `error` and `guidance_url` when the report may be urgent. Show the guidance and hide the send controls for that report. When the server finishes Gemini analysis, call `record_urgent_analysis(user_id, report_id, analyzed_version, analysis)` from `db.py` before returning the result to the UI. Use the version that was actually analyzed and pass the saved urgency flag to routing. Supply the trusted server result to this helper.
+
 ## Existing shared interfaces
 
 Calls below require a Flask application context. The app's request handlers already have one; standalone scripts use `with app.app_context():`.

@@ -65,6 +65,15 @@ def _mail_error(error):
     return jsonify(error=str(error)), error.status
 
 
+@bp.errorhandler(mail.UrgentReportError)
+def _urgent_report(error):
+    return jsonify(
+        error=str(error),
+        code="urgent_guidance",
+        guidance_url="https://www.usf.edu/facilities/service-center/work-requests.aspx",
+    ), error.status
+
+
 @bp.errorhandler(ValidationError)
 def _invalid_data(_error):
     return jsonify(error="Check the requested report version, category, and email fields."), 400

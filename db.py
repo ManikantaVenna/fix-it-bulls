@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from flask import current_app, g
 
-from schemas import ReportInput
+from schemas import AnalysisOutput, ReportInput
 
 
 class ReportLockedError(ValueError):
@@ -51,6 +51,11 @@ def init_db():
             updated_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS reports_owner ON reports(user_id);
+        CREATE TABLE IF NOT EXISTS urgent_report_versions (
+            report_id TEXT NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+            version INTEGER NOT NULL,
+            PRIMARY KEY (report_id, version)
+        );
         CREATE TABLE IF NOT EXISTS gmail_connections (
             user_id TEXT PRIMARY KEY REFERENCES users(id),
             encrypted_refresh_token BLOB NOT NULL
@@ -117,12 +122,32 @@ def create_report(user_id, report):
 
 
 def get_report(user_id, report_id):
-    row = get_db().execute("SELECT * FROM reports WHERE id=? AND user_id=?", (report_id, user_id)).fetchone()
+    row = get_db().execute(
+        "SELECT reports.*, EXISTS (SELECT 1 FROM urgent_report_versions "
+        "WHERE report_id=reports.id AND version=reports.version) AS flagged_urgent "
+        "FROM reports WHERE id=? AND user_id=?",
+        (report_id, user_id),
+    ).fetchone()
     if row is None:
         return None
     report = dict(row)
     report["report"] = json.loads(report.pop("report_json"))
+    report["flagged_urgent"] = bool(report["flagged_urgent"])
     return report
+
+
+def record_urgent_analysis(user_id: str, report_id: str, version: int, analysis: AnalysisOutput) -> bool:
+    """Record a positive finding from the server's analysis of this report version."""
+    if not analysis.possible_urgent_concern:
+        return False
+    db = get_db()
+    with db:
+        result = db.execute(
+            "INSERT OR IGNORE INTO urgent_report_versions(report_id,version) "
+            "SELECT id,version FROM reports WHERE id=? AND user_id=? AND version=?",
+            (report_id, user_id, version),
+        )
+    return result.rowcount > 0
 
 
 def update_report(user_id, report_id, changes):
