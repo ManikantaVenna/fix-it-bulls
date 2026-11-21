@@ -125,6 +125,8 @@ textarea { resize: vertical; }
 .hint { color: var(--muted); font-size: .9rem; margin-top: .35rem; }
 .notice { margin-bottom: 1rem; padding: .65rem .85rem; border: 1px solid #e0d4aa; border-radius: 7px; background: #faf4df; }
 .notice.error { border-color: #d89b92; background: #fff1ee; }
+.oauth-problem { max-width: 38rem; margin: 2rem auto; }
+.oauth-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .9rem; margin-top: 1.4rem; }
 .field-error { color: #962c24; margin-top: .3rem; }
 [aria-invalid="true"] { border-color: #962c24 !important; }
 .more-details { margin: .15rem 0 1rem; border-bottom: 1px solid var(--line); }

@@ -72,6 +72,38 @@ def test_connection_separates_gmail_scopes_and_checks_returned_subject(setup, mo
     assert client.get("/gmail/status").json["connected"] is False
 
 
+def test_gmail_attempts_survive_overlap_but_not_disconnect(setup, monkeypatch):
+    from routes import gmail
+
+    app, owner, _, _ = setup
+    client = app.test_client()
+    with client.session_transaction() as state:
+        state["user_id"] = owner
+    headers = {"X-CSRFToken": client.get("/api/csrf").json["csrf_token"]}
+    monkeypatch.setattr(gmail, "exchange_consent", lambda code, pending: ("owner-sub", "test-refresh-token"))
+
+    def start_consent():
+        response = client.post("/gmail/connect", headers=headers)
+        assert response.status_code == 303
+        return parse_qs(urlparse(response.location).query)["state"][0]
+
+    def finish_consent(state):
+        return client.get("/gmail/callback", query_string={"code": "fixture", "state": state})
+
+    first, second = start_consent(), start_consent()
+    assert finish_consent(first).status_code == 303
+    assert finish_consent(second).status_code == 303
+    replay = finish_consent(first)
+    assert replay.status_code == 400
+    assert "Back to Account" in replay.text
+
+    abandoned = start_consent()
+    client.post("/gmail/disconnect", headers=headers)
+    start_consent()
+    assert finish_consent(abandoned).status_code == 400
+    assert client.get("/gmail/status").json["connected"] is False
+
+
 def test_mailbox_credentials_are_encrypted_and_owner_scoped(setup):
     app, owner, stranger, report = setup
     with app.app_context():
@@ -95,6 +127,54 @@ def test_review_only_uses_maintained_routes(setup, monkeypatch):
         connect(owner)
         with pytest.raises(mail.MailError, match="verified email route"):
             preview(owner, report)
+
+
+def test_official_delivery_uses_directory_and_invalidates_old_test_approval(setup, monkeypatch):
+    app, owner, _, report = setup
+    monkeypatch.setattr(mail, "_resolve_route", lambda *_: RoutingOutput(
+        state="ready_email", route_id="usf_facilities_service_center",
+        reason="Facilities handles the issue.",
+        official_source="https://www.usf.edu/facilities/service-center/work-requests.aspx",
+    ))
+
+    def deliver(token, raw):
+        message = BytesParser(policy=policy.default).parsebytes(base64.urlsafe_b64decode(raw))
+        assert str(message["To"]) == "FM-ServiceCenter@usf.edu"
+        assert str(message["Subject"]) == "Leaking fixture"
+        return {"id": "official-fixture", "threadId": "official-thread"}
+
+    monkeypatch.setattr(mail.gmail_client, "send_message", deliver)
+    with app.app_context():
+        connect(owner)
+        test_review = preview(owner, report)
+        app.config["SEND_MODE"] = "OFFICIAL"
+        with pytest.raises(mail.MailError, match="Review the email again"):
+            send(owner, report, test_review)
+        official_review = preview(owner, report)
+        assert official_review["mode"] == "OFFICIAL"
+        assert official_review["recipient"] == "FM-ServiceCenter@usf.edu"
+        assert send(owner, report, official_review).state == "sent"
+
+
+def test_external_draft_uses_official_recipient_without_mailbox_or_send(setup, monkeypatch):
+    app, owner, stranger, report = setup
+    app.config["SEND_MODE"] = "OFFICIAL"
+    monkeypatch.setattr(mail, "_resolve_route", lambda *_: RoutingOutput(
+        state="ready_email", route_id="usf_it_help", reason="IT handles the issue.",
+        official_source="https://www.usf.edu/it/get-help/",
+    ))
+    with app.app_context():
+        assert not mail.mailbox_connected(owner)
+        draft = mail.prepare_external_draft(owner, report, 1, "computer_av", "Screen & keyboard", "Issue in lab.")
+        assert draft == {
+            "recipient": "help@usf.edu",
+            "draft_url": "mailto:help@usf.edu?subject=Screen%20%26%20keyboard&body=Issue%20in%20lab.",
+        }
+        with pytest.raises(mail.MailError, match="Report not found"):
+            mail.prepare_external_draft(stranger, report, 1, "computer_av", "Screen", "Issue in lab.")
+        with pytest.raises(mail.UrgentReportError):
+            mail.prepare_external_draft(owner, report, 1, "computer_av", "Screen", "Sparks coming from the outlet.")
+        assert get_report(owner, report)["communication_status"] == "prepared"
 
 
 @pytest.mark.parametrize(

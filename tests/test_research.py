@@ -26,7 +26,8 @@ FINDING = {
 }
 
 
-def response(finding=FINDING, chunks=(("usf.edu", "https://vertexaisearch.example/redirect/1"),), urls=()):
+def response(finding=FINDING, chunks=(("usf.edu", "https://vertexaisearch.cloud.google.com/grounding-api-redirect/1"),),
+             urls=()):
     gm = NS(
         grounding_chunks=[NS(web=NS(title=t, uri=u)) for t, u in chunks],
         web_search_queries=["USF Bull Runner report problem"],
@@ -105,6 +106,13 @@ def test_failed_url_retrieval_is_not_cited():
     assert out.status == "insufficient_evidence"
 
 
+def test_usf_title_does_not_make_an_arbitrary_or_malformed_link_official():
+    resp = response(chunks=(("usf.edu", "https://example.test/report"), ("usf.edu", "https://[/")))
+    out = research_channel(report(), client=FakeClient(resp))
+    assert out.status == "insufficient_evidence"
+    assert out.supporting_source_links == []
+
+
 def test_conflicting_sources_are_reported():
     out = research_channel(report(), client=FakeClient(response({**FINDING, "sources_conflict": True})))
     assert out.status == "conflicting_sources"
@@ -177,3 +185,21 @@ def test_display_sources_is_plain_data():
     assert out["links"][1]["label"] == "Google Search result (usf.edu)"  # redirect link
     assert out["widget_html"] == "<div>search</div>"
     assert out["consulted_at"]
+
+
+class ReadTimeout(Exception):
+    pass
+
+
+class SearchTimeoutClient(FakeClient):
+    def generate_content(self, **kwargs):
+        self.calls.append(kwargs)
+        if any(t.google_search is not None for t in kwargs["config"].tools):
+            raise ReadTimeout("search took too long")
+        return self.resp
+
+
+def test_search_timeout_falls_back_to_official_pages():
+    resp = response(chunks=(), urls=[("https://www.usf.edu/parking/", "URL_RETRIEVAL_STATUS_SUCCESS")])
+    out = research_channel(report(), issue_type="parking_transport", client=SearchTimeoutClient(resp))
+    assert out.status == "sourced_suggestion"

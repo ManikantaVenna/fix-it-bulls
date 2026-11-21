@@ -1,7 +1,6 @@
 """Mailbox consent and user-approved report mail endpoints."""
 
 import secrets
-import time
 from uuid import UUID
 
 from flask import Blueprint, current_app, jsonify, redirect, request, session, url_for
@@ -12,7 +11,7 @@ from oauthlib.oauth2 import OAuth2Error
 from pydantic import Field, ValidationError
 from requests import RequestException
 
-from routes.auth import IDENTITY_SCOPES, _flow
+from routes.auth import IDENTITY_SCOPES, _flow, begin_oauth, clear_oauth_cookie, oauth_problem, take_oauth_attempt
 from schemas import Contract, IssueType
 from services import mail
 from services.gmail_client import GMAIL_SCOPES
@@ -63,6 +62,13 @@ def exchange_consent(code, pending):
 
 @bp.errorhandler(mail.MailError)
 def _mail_error(error):
+    if request.endpoint in {"gmail.connect", "gmail.callback"}:
+        if error.status == 401:
+            return oauth_problem("Sign in to connect Gmail", "Once signed in, open Account to connect Gmail.", 401)
+        return oauth_problem(
+            "Gmail connection didn’t finish", str(error), error.status,
+            retry_endpoint="reports.account", retry_label="Back to Account",
+        )
     return jsonify(error=str(error)), error.status
 
 
@@ -82,38 +88,47 @@ def _invalid_data(_error):
 
 @bp.post("/gmail/connect")
 def connect():
-    user_id = _user_id()
+    _user_id()
     if not all(current_app.config.get(key) for key in (
         "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GMAIL_REDIRECT_URI", "GMAIL_TOKEN_KEY",
     )):
         raise mail.MailError("Configure Gmail OAuth and token encryption before connecting.", 503)
-    nonce = secrets.token_urlsafe(32)
-    flow = _consent_flow()
-    location, state = flow.authorization_url(nonce=nonce, access_type="offline", prompt="consent select_account")
-    session["gmail_consent"] = {
-        "user_id": user_id, "state": state, "nonce": nonce, "code_verifier": flow.code_verifier,
-        "started_at": int(time.time()),
-    }
+    consent_key = session.get("gmail_consent_key")
+    if not consent_key:
+        consent_key = session["gmail_consent_key"] = secrets.token_urlsafe(32)
+    context = {}
     report_id = request.form.get("report_id")
     if report_id and "reports.review" in current_app.view_functions:
         try:
-            session["gmail_consent"]["report_id"] = UUID(report_id).hex
+            context["report_id"] = UUID(report_id).hex
         except ValueError:
             pass
     elif request.form.get("return_to") == "account" and "reports.account" in current_app.view_functions:
-        session["gmail_consent"]["return_to_account"] = True
-    return redirect(location, code=303)
+        context["return_to_account"] = True
+    return begin_oauth(
+        _consent_flow(), "gmail.callback", context=context, binding=consent_key, redirect_code=303,
+        access_type="offline", prompt="consent select_account",
+    )
 
 
 @bp.get("/gmail/callback")
 def callback():
     user_id = _user_id()
-    pending = session.get("gmail_consent")
-    state = request.args.get("state", "")
-    if not pending or pending["user_id"] != user_id or not secrets.compare_digest(pending["state"].encode(), state.encode()):
+    consent_key = session.get("gmail_consent_key")
+    if not consent_key:
         raise mail.MailError("Gmail consent does not match your sign-in session. Connect again.", 400)
-    session.pop("gmail_consent")
-    if time.time() - pending["started_at"] > 600 or request.args.get("error") or not request.args.get("code"):
+    pending, cookie_name = take_oauth_attempt("gmail.callback", binding=consent_key)
+    try:
+        response = _finish_consent(user_id, pending)
+    except mail.MailError as error:
+        response = _mail_error(error)
+    return clear_oauth_cookie(response, "gmail.callback", cookie_name)
+
+
+def _finish_consent(user_id, pending):
+    if not pending:
+        raise mail.MailError("Gmail consent has expired or was opened in a different session. Connect again.", 400)
+    if request.args.get("error") or not request.args.get("code"):
         raise mail.MailError("Gmail connection did not finish. Connect again.", 400)
     try:
         subject, token = exchange_consent(request.args["code"], pending)
@@ -137,7 +152,7 @@ def status():
 @bp.post("/gmail/disconnect")
 def disconnect():
     mail.disconnect_mailbox(_user_id())
-    session.pop("gmail_consent", None)
+    session.pop("gmail_consent_key", None)
     if request.form.get("return_to") == "account" and "reports.account" in current_app.view_functions:
         return redirect(url_for("reports.account"), code=303)
     return jsonify(connected=False)
@@ -148,6 +163,13 @@ def email_review(report_id):
     user_id = _user_id()
     data = EmailReviewInput.model_validate(request.get_json(silent=True))
     return jsonify(mail.prepare_email_review(user_id, report_id, **data.model_dump()))
+
+
+@bp.post("/reports/<report_id>/email-draft")
+def email_draft(report_id):
+    user_id = _user_id()
+    data = EmailReviewInput.model_validate(request.get_json(silent=True))
+    return jsonify(mail.prepare_external_draft(user_id, report_id, **data.model_dump()))
 
 
 @bp.post("/reports/<report_id>/approve-send")

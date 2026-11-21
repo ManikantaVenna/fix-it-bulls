@@ -32,16 +32,30 @@
       <div id="mail-controls"
            data-csrf="{{ csrf_token() }}"
            data-review-url="{{ url_for('gmail.email_review', report_id=report_id) }}"
+           data-draft-url="{{ url_for('gmail.email_draft', report_id=report_id) }}"
            data-send-url="{{ url_for('gmail.approve_send', report_id=report_id) }}"
            data-replies-url="{{ url_for('gmail.check_replies', report_id=report_id) }}"
            data-report-version="{{ saved.version }}"
            data-issue-type="{{ analysis.suggested_issue_type if analysis else '' }}">
+        {% set test_mode = config['SEND_MODE'] == 'TEST' %}
         <p class="notice" id="mail-status" role="status" hidden></p>
         <a id="mail-guidance" hidden>Open USF guidance</a>
+        {% if not locked and route and route.state == "ready_email" and config['SEND_MODE'] == 'OFFICIAL' %}
+          <button type="button" class="button {{ 'secondary' if connected else 'primary' }}" id="prepare-external-email" hidden>Prepare email draft</button>
+          <section class="email-preview" id="external-email" aria-labelledby="external-heading" hidden>
+            <h3 id="external-heading">Send from your email app</h3>
+            <p>To <strong id="external-recipient"></strong></p>
+            <p class="hint">Open the draft and send it there. Replies will arrive in that inbox.</p>
+            <a class="button primary" id="open-email-draft">Open email app</a>
+            {% if report.photo_id %}
+              <a class="button secondary" href="{{ url_for('reports.photo', report_id=report_id) }}" download="report-photo.jpg">Download photo to attach</a>
+            {% endif %}
+          </section>
+        {% endif %}
         {% if not locked and route and route.state == "ready_email" and connected %}
-          <button type="button" class="button primary" id="preview-email" hidden>Review test email</button>
+          <button type="button" class="button primary" id="preview-email" hidden>{{ "Review test email" if test_mode else "Review & send with Gmail" }}</button>
           <section class="email-preview" id="email-preview" aria-labelledby="preview-heading" hidden>
-            <h3 id="preview-heading">Confirm test email</h3>
+            <h3 id="preview-heading">{{ "Confirm test email" if test_mode else "Confirm email to USF" }}</h3>
             <dl id="email-details"></dl>
             <pre id="email-body"></pre>
             {% if report.photo_id %}
@@ -73,7 +87,7 @@
             <p>{{ route.reason }}</p>
             {% if route.state == "ready_email" %}
               <p>USF contact <strong>{{ destination.recipient }}</strong></p>
-              <p class="hint">Demo emails go to the configured test inbox.</p>
+              {% if test_mode %}<p class="hint">Demo emails go to the configured test inbox.</p>{% endif %}
             {% elif route.state == "ready_handoff" and destination %}
               <a class="button secondary link-button" href="{{ destination.handoff_url }}">Open official form</a>
               <p class="hint">Complete and submit your report on the USF form.</p>
@@ -158,6 +172,7 @@
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="hidden" name="report_id" value="{{ report_id }}">
           <button class="button secondary" type="submit">Connect Gmail</button>
+          {% if config['PUBLIC_GOOGLE_SIGN_IN'] %}<p class="hint">Gmail integration is limited to Google test users. Anyone can prepare an email draft above.</p>{% endif %}
         </form>
       {% endif %}
       <details class="original-report"><summary>Original report</summary>

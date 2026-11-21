@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · Fix It Bulls{% endblock %}
+{% block content %}
+<section class="oauth-problem" aria-labelledby="oauth-heading">
+  <h1 id="oauth-heading">{{ title }}</h1>
+  <p>{{ message }}</p>
+  <div class="oauth-actions">
+    <a class="button primary" href="{{ retry_url }}">{{ retry_label }}</a>
+    <a href="{{ url_for('index') }}">Back to home</a>
+  </div>
+</section>
+{% endblock %}

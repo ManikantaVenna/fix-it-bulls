@@ -38,6 +38,10 @@ Set `GEMINI_API_KEY` in the private `.env` for photo analysis and source researc
 
 If Gmail's send result is uncertain, inspect the sender's Sent folder using the reviewed subject. Keep that report locked while verifying delivery to avoid a duplicate. Disconnect removes the stored connection from Fix It Bulls. Google account settings manage the permission grant itself.
 
+## Public reporting
+
+Set `PUBLIC_GOOGLE_SIGN_IN=true` on the shared HTTPS deployment to accept any verified Google account. Set `SEND_MODE=OFFICIAL` to use the active, verified USF contact in the routing directory for approved mail. In this mode users can also prepare a preaddressed email draft, send it from their own email app, and attach the report photo manually. Replies to these messages stay in their email app. The separate Gmail integration still follows the Google OAuth project's test-user and consent settings.
+
 SQLite and photos are created under ignored `instance/`. Each developer uses separate runtime data. Git transfers source code, not the team's live database. The integrated demo will run on one primary instance.
 
 ## Work ownership

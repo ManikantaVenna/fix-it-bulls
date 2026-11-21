@@ -18,6 +18,9 @@
     <section class="panel">
       <h2>Gmail connection</h2>
       <p>{{ "Connected" if connected else "Connect Gmail to send approved reports and check for replies." }}</p>
+      {% if not connected and config['PUBLIC_GOOGLE_SIGN_IN'] %}
+        <p class="hint">Google limits this integration to test users. You can send through your own email app from the report review page.</p>
+      {% endif %}
       <form method="post" action="{{ url_for('gmail.disconnect' if connected else 'gmail.connect') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="return_to" value="account">
