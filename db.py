@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from flask import current_app, g
 
-from schemas import ReportInput
+from schemas import AnalysisOutput, ReportInput
 
 
 class ReportLockedError(ValueError):
@@ -51,6 +51,43 @@ def init_db():
             updated_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS reports_owner ON reports(user_id);
+        CREATE TABLE IF NOT EXISTS urgent_report_versions (
+            report_id TEXT NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+            version INTEGER NOT NULL,
+            PRIMARY KEY (report_id, version)
+        );
+        CREATE TABLE IF NOT EXISTS report_analysis (
+            report_id TEXT PRIMARY KEY REFERENCES reports(id) ON DELETE CASCADE,
+            version INTEGER NOT NULL,
+            analysis_json TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS gmail_connections (
+            user_id TEXT PRIMARY KEY REFERENCES users(id),
+            encrypted_refresh_token BLOB NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS gmail_reviews (
+            report_id TEXT PRIMARY KEY REFERENCES reports(id) ON DELETE CASCADE,
+            id TEXT NOT NULL UNIQUE,
+            version INTEGER NOT NULL,
+            snapshot_json TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS gmail_attempts (
+            id TEXT PRIMARY KEY,
+            report_id TEXT NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+            snapshot_json TEXT NOT NULL,
+            state TEXT NOT NULL,
+            message_id TEXT,
+            thread_id TEXT,
+            sent_at TEXT,
+            error_code TEXT,
+            rfc_message_id TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS gmail_reply_refs (
+            attempt_id TEXT NOT NULL REFERENCES gmail_attempts(id) ON DELETE CASCADE,
+            message_id TEXT NOT NULL,
+            received_at TEXT NOT NULL,
+            PRIMARY KEY (attempt_id, message_id)
+        );
     """)
 
 
@@ -59,15 +96,13 @@ def upsert_user(google_sub, email):
     if not google_sub or not email:
         raise ValueError("Validated Google subject and email are required")
     db = get_db()
-    existing = db.execute("SELECT id FROM users WHERE google_sub=?", (google_sub,)).fetchone()
-    if existing:
-        db.execute("UPDATE users SET email=? WHERE id=?", (email, existing["id"]))
-        db.commit()
-        return existing["id"]
-    user_id = uuid4().hex
-    db.execute("INSERT INTO users(id,google_sub,email) VALUES(?,?,?)", (user_id, google_sub, email))
-    db.commit()
-    return user_id
+    with db:
+        row = db.execute(
+            "INSERT INTO users(id,google_sub,email) VALUES(?,?,?) "
+            "ON CONFLICT(google_sub) DO UPDATE SET email=excluded.email RETURNING id",
+            (uuid4().hex, google_sub, email),
+        ).fetchone()
+    return row["id"]
 
 
 def _check_photo_owner(user_id, report):
@@ -92,15 +127,51 @@ def create_report(user_id, report):
 
 
 def get_report(user_id, report_id):
-    row = get_db().execute("SELECT * FROM reports WHERE id=? AND user_id=?", (report_id, user_id)).fetchone()
+    row = get_db().execute(
+        "SELECT reports.*, report_analysis.analysis_json, EXISTS (SELECT 1 FROM urgent_report_versions "
+        "WHERE urgent_report_versions.report_id=reports.id AND urgent_report_versions.version=reports.version) AS flagged_urgent "
+        "FROM reports LEFT JOIN report_analysis ON report_analysis.report_id=reports.id "
+        "AND report_analysis.version=reports.version WHERE reports.id=? AND reports.user_id=?",
+        (report_id, user_id),
+    ).fetchone()
     if row is None:
         return None
     report = dict(row)
     report["report"] = json.loads(report.pop("report_json"))
+    analysis_json = report.pop("analysis_json")
+    report["analysis"] = AnalysisOutput.model_validate_json(analysis_json) if analysis_json else None
+    report["flagged_urgent"] = bool(report["flagged_urgent"])
     return report
 
 
-def update_report(user_id, report_id, changes):
+def record_urgent_analysis(user_id: str, report_id: str, version: int, analysis: AnalysisOutput) -> bool:
+    """Record a positive finding from the server's analysis of this report version."""
+    if not analysis.possible_urgent_concern:
+        return False
+    db = get_db()
+    with db:
+        result = db.execute(
+            "INSERT OR IGNORE INTO urgent_report_versions(report_id,version) "
+            "SELECT id,version FROM reports WHERE id=? AND user_id=? AND version=?",
+            (report_id, user_id, version),
+        )
+    return result.rowcount > 0
+
+
+def save_report_analysis(user_id: str, report_id: str, version: int, analysis: AnalysisOutput) -> bool:
+    db = get_db()
+    with db:
+        result = db.execute(
+            "INSERT INTO report_analysis(report_id,version,analysis_json) "
+            "SELECT id,version,? FROM reports WHERE id=? AND user_id=? AND version=? "
+            "AND communication_status IN ('prepared','send_failed') "
+            "ON CONFLICT(report_id) DO UPDATE SET version=excluded.version,analysis_json=excluded.analysis_json",
+            (analysis.model_dump_json(), report_id, user_id, version),
+        )
+    return result.rowcount > 0
+
+
+def update_report(user_id, report_id, changes, *, expected_version=None):
     if not isinstance(changes, dict) or set(changes) - set(ReportInput.model_fields):
         raise ValueError("Only report input fields can be edited")
     db = get_db()
@@ -110,6 +181,8 @@ def update_report(user_id, report_id, changes):
         existing = get_report(user_id, report_id)
         if existing is None:
             raise LookupError("Report not found")
+        if expected_version is not None and existing["version"] != expected_version:
+            raise ReportLockedError("The report changed. Reload the latest version.")
         if existing["communication_status"] in {"sending", "sent", "send_unknown", "reply_received"}:
             raise ReportLockedError("Preserve outbound evidence; create an explicit correction instead")
         report = ReportInput.model_validate({**existing["report"], **changes})

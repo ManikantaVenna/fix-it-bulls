@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Account | Fix It Bulls{% endblock %}
+{% block page_class %}page-narrow{% endblock %}
+{% block content %}
+  <div class="page-heading">
+    <h1>Account</h1>
+    <p>Manage your Google sign-in and Gmail connection.</p>
+  </div>
+  <div class="info-grid">
+    <section class="panel">
+      <h2>Google sign-in</h2>
+      <p>{{ email }}</p>
+      <form method="post" action="{{ url_for('auth.logout') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="button secondary" type="submit">Sign out</button>
+      </form>
+    </section>
+    <section class="panel">
+      <h2>Gmail connection</h2>
+      <p>{{ "Connected" if connected else "Connect Gmail to send approved reports and check for replies." }}</p>
+      <form method="post" action="{{ url_for('gmail.disconnect' if connected else 'gmail.connect') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="return_to" value="account">
+        <button class="button {{ 'secondary' if connected else 'primary' }}" type="submit">{{ "Disconnect Gmail" if connected else "Connect Gmail" }}</button>
+      </form>
+    </section>
+  </div>
+{% endblock %}

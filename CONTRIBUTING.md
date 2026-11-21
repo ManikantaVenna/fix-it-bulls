@@ -52,16 +52,24 @@ Prioritize a real image response and core IT/Facilities/Housing/Library rules, t
 
 ## Manikanta: foundation and Gmail
 
-Own shared schema/config/database changes and `routes/auth.py`, `routes/gmail.py`, `services/gmail_client.py`. Google login and Gmail consent are separate; bind tokens to the validated owner. Use approved immutable report versions and the directory when sending. Add actual photo email, message/thread IDs and manual same-thread reply retrieval before background features.
+Own shared schema/config/database changes, `routes/auth.py`, `routes/gmail.py`, `services/gmail_client.py`, and `services/mail.py`. Google sign-in and Gmail consent are separate. The backend binds the mailbox to the signed-in account and checks Hanif's `resolve_route` again before sending. Only `ready_email` with a maintained route ID and official source can reach the email review screen.
 
-Planned service interface:
+### Gmail endpoints for the report interface
 
-```python
-send_approved_report(user_id: str, report_id: str, approved_version: int) -> SendOutcome
-check_report_replies(user_id: str, report_id: str) -> list[MailEvent]
-```
+All endpoints require a signed-in session. For POST requests, include a form CSRF token or use the `X-CSRFToken` header from `GET /api/csrf` for JavaScript requests.
 
-These functions are pending, not implemented by the starter. Keep imported-mail AI summaries disabled until compatible processing is established.
+| Endpoint | Request and response |
+|---|---|
+| `GET /gmail/status` | Returns `{"connected": true}` or `{"connected": false}`. |
+| `POST /gmail/connect` | Submit as a browser form so the redirect opens Google consent. |
+| `POST /gmail/disconnect` | Removes the saved connection and returns `{"connected": false}`. |
+| `POST /reports/<id>/email-review` | JSON with `report_version`, `issue_type`, `subject`, and `body`. Returns `approval_id`, `report_version`, `mode`, `route`, `sender`, `recipient`, `subject`, `body`, `photo_id` and `issue_type`. |
+| `POST /reports/<id>/approve-send` | JSON with `approved_version` and `approval_id` from the review. Returns the `SendOutcome` fields in `schemas.py`. |
+| `POST /reports/<id>/check-replies` | Returns `{"replies": [...]}` with the `MailEvent` fields in `schemas.py`. |
+
+Show the exact sender, test inbox, subject, message and attachment returned by the server. Open a new review after edits, including draft text edits. Call approve-send only when the user presses **Send report**. For `send_failed`, open a new review before another attempt. If delivery is uncertain, direct the user to verify in Gmail and keep the report locked. Render `safe_text` and sender names as text. Reply bodies stay in Gmail.
+
+Preview and send both return HTTP 409 with `code: "urgent_guidance"`, `error` and `guidance_url` when the report may be urgent. Show the guidance and hide the send controls for that report. When the server finishes Gemini analysis, call `record_urgent_analysis(user_id, report_id, analyzed_version, analysis)` from `db.py` before returning the result to the UI. Use the version that was actually analyzed and pass the saved urgency flag to routing. Supply the trusted server result to this helper.
 
 ## Existing shared interfaces
 

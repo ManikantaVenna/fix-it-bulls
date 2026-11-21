@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% from "icons.html" import icon %}
+{% block title %}Report a campus issue | Fix It Bulls{% endblock %}
+{% macro field_error(name) %}
+  {% if errors[name] %}<p class="field-error" id="{{ name }}-error">{{ errors[name] }}</p>{% endif %}
+{% endmacro %}
+{% macro attributes(name, help='') -%}
+  {%- if errors[name] %} aria-invalid="true" aria-describedby="{{ name }}-error{% if help %} {{ help }}{% endif %}"
+  {%- elif help %} aria-describedby="{{ help }}"
+  {%- endif -%}
+{% endmacro %}
+{% block page_class %}page-narrow{% endblock %}
+{% block content %}
+  <div class="page-heading">
+    <h1>Report a campus issue</h1>
+    <p>For non-urgent issues at USF Tampa.</p>
+  </div>
+  {% if errors %}
+    <div class="notice error" role="alert">
+      {{ errors.form or "Check the highlighted fields, then try again." }}
+      {% if not errors.form %}If you selected a photo, choose it again before continuing.{% endif %}
+    </div>
+  {% elif not signed_in %}
+    <p class="notice"><a href="{{ url_for('auth.start') }}">Sign in with Google</a> to save a report.</p>
+  {% endif %}
+  <form class="panel" method="post" enctype="multipart/form-data" action="{{ url_for('reports.new') }}">
+    <input type="hidden" name="analyze_now" value="1">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="field">
+      <label for="description">What happened?</label>
+      <textarea name="description" id="description" maxlength="4000" rows="4" required{{ attributes('description') }}
+        placeholder="For example, the water fountain does not dispense water.">{{ values.get('description', '') }}</textarea>
+      {{ field_error('description') }}
+    </div>
+    <fieldset>
+      <legend class="visually-hidden">Location</legend>
+      <div class="field-grid">
+        <div class="field">
+          <label for="building_or_area">Building or area</label>
+          <input name="building_or_area" id="building_or_area" maxlength="200" required{{ attributes('building_or_area') }}
+            value="{{ values.get('building_or_area', '') }}" list="campus-buildings" placeholder="e.g., Marshall Student Center">
+          <datalist id="campus-buildings">
+            <option value="Marshall Student Center"></option>
+            <option value="USF Tampa Library"></option>
+            <option value="Juniper-Poplar Hall"></option>
+            <option value="Engineering II"></option>
+          </datalist>
+          {{ field_error('building_or_area') }}
+        </div>
+        <div class="field">
+          <label for="room_floor_landmark">Room, floor, or landmark <span>Optional</span></label>
+          <input name="room_floor_landmark" id="room_floor_landmark" maxlength="300"{{ attributes('room_floor_landmark') }}
+            value="{{ values.get('room_floor_landmark', '') }}" placeholder="For example, first floor by the elevators">
+          {{ field_error('room_floor_landmark') }}
+        </div>
+      </div>
+      <details class="more-details"{% if errors.site_type or errors.ownership or errors.asset_tag %} open{% endif %}>
+        <summary>More location details</summary>
+        <div class="field-grid">
+        <div class="field">
+          <label for="site_type">Location type</label>
+          <select name="site_type" id="site_type"{{ attributes('site_type') }}>
+            {% for value, label in [('unknown', 'Not sure'), ('non_residential', 'Non-residential building'), ('residence_hall', 'Residence hall'), ('outdoor', 'Outdoor area')] %}
+              <option value="{{ value }}"{% if values.get('site_type', 'unknown') == value %} selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          {{ field_error('site_type') }}
+        </div>
+        <div class="field">
+          <label for="ownership">Who owns the equipment?</label>
+          <select name="ownership" id="ownership"{{ attributes('ownership') }}>
+            {% for value, label in [('unknown', 'Not sure or not applicable'), ('campus', 'USF'), ('personal', 'Personal equipment')] %}
+              <option value="{{ value }}"{% if values.get('ownership', 'unknown') == value %} selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          {{ field_error('ownership') }}
+        </div>
+        <div class="field">
+          <label for="asset_tag">Equipment label <span>Optional</span></label>
+          <input name="asset_tag" id="asset_tag" maxlength="100"{{ attributes('asset_tag') }} value="{{ values.get('asset_tag', '') }}">
+          {{ field_error('asset_tag') }}
+        </div>
+        </div>
+      </details>
+    </fieldset>
+    <div class="field photo-field">
+      <p class="photo-title">Report photo <span>Optional</span></p>
+      <p class="hint" id="photo-help">One JPEG, PNG, or WebP image, up to 5 MB.</p>
+      <div class="photo-actions">
+        <button class="button primary" type="button" id="open-camera" aria-controls="camera-panel"
+                aria-expanded="false" hidden>{{ icon('camera', 18) }} Take photo</button>
+        <div class="photo-upload">
+          <label for="photo" class="button secondary">{{ icon('upload', 18) }} Upload photo</label>
+          <input type="file" name="photo" id="photo" accept="image/jpeg,image/png,image/webp"{{ attributes('photo', 'photo-help') }}>
+        </div>
+      </div>
+      <input type="file" name="photo" id="camera-file" accept="image/*" capture="environment" hidden>
+      <p class="hint" id="camera-status" role="status" hidden></p>
+      {{ field_error('photo') }}
+      <div class="camera-panel" id="camera-panel" hidden>
+        <video id="camera-video" aria-label="Live camera preview" autoplay muted playsinline></video>
+        <div class="photo-actions">
+          <button class="button primary" type="button" id="capture-photo" disabled>Capture photo</button>
+          <button class="button secondary" type="button" id="cancel-camera">Close camera</button>
+        </div>
+      </div>
+      <div class="preview" id="preview" hidden>
+        <img id="preview-image" alt="Preview of the selected photo">
+        <button class="button secondary" type="button" id="remove-photo">Remove photo</button>
+      </div>
+    </div>
+    <button class="button primary" type="submit" data-pending="Analyzing report…"{% if not signed_in %} disabled{% endif %}>Analyze report</button>
+  </form>
+{% endblock %}

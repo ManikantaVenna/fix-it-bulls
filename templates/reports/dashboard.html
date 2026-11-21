@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% from "icons.html" import icon %}
+{% from "reports/_report_list.html" import report_list %}
+{% block title %}Fix It Bulls | Campus issue reporting{% endblock %}
+{% block content %}
+<section class="home-hero" aria-labelledby="home-heading">
+  <figure class="hero-image">
+    <img src="{{ url_for('static', filename='marshall-student-center.webp') }}" width="1200" height="760"
+         alt="Bronze bull statues outside the USF Marshall Student Center" fetchpriority="high">
+  </figure>
+  <div class="hero-copy">
+    <p class="section-kicker">University of South Florida · Tampa</p>
+    <h1 id="home-heading">Make campus <em>work better.</em></h1>
+    <p class="hero-description">Report a campus issue and see what happens next.</p>
+    <a class="button hero-button" href="{{ url_for('reports.new') }}">Report an issue {{ icon('arrow', 18) }}</a>
+  </div>
+  <p class="hero-credit"><a href="https://commons.wikimedia.org/wiki/File:USF_Marshall_Center_Running_of_the_Bulls.JPG">Marshall Student Center · Rick DeBow</a></p>
+</section>
+<div class="home-overview">
+  <section aria-labelledby="recent-heading">
+    <div class="section-heading">
+      <h2 id="recent-heading">My recent reports</h2>
+      {% if signed_in and reports %}<a href="{{ url_for('reports.history') }}">View all</a>{% endif %}
+    </div>
+    {% if reports %}
+      {{ report_list(reports, statuses) }}
+    {% elif signed_in %}
+      <p class="empty-message">Your saved campus reports will appear here.</p>
+    {% else %}
+      <p class="empty-message"><a href="{{ url_for('auth.start') }}">Sign in with Google</a> to view and track your reports.</p>
+    {% endif %}
+  </section>
+  <aside class="home-help" aria-labelledby="reporting-help">
+    <h2 id="reporting-help">Where does my report go?</h2>
+    <p>Fix It Bulls finds a USF reporting channel. Review the destination before sending.</p>
+    <a href="{{ url_for('reports.help_page') }}">See how reporting works</a>
+  </aside>
+</div>
+{% endblock %}
