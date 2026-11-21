@@ -17,7 +17,7 @@ bp = Blueprint("auth", __name__)
 IDENTITY_SCOPES = ("openid", "https://www.googleapis.com/auth/userinfo.email")
 
 
-def _flow(*, state=None, code_verifier=None):
+def _flow(*, state=None, code_verifier=None, scopes=IDENTITY_SCOPES, redirect_key="GOOGLE_REDIRECT_URI"):
     config = current_app.config
     return Flow.from_client_config(
         {"web": {
@@ -26,8 +26,8 @@ def _flow(*, state=None, code_verifier=None):
             "auth_uri": "https://accounts.google.com/o/oauth2/v2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
         }},
-        scopes=IDENTITY_SCOPES,
-        redirect_uri=config["GOOGLE_REDIRECT_URI"],
+        scopes=scopes,
+        redirect_uri=config[redirect_key],
         state=state,
         code_verifier=code_verifier,
         autogenerate_code_verifier=code_verifier is None,

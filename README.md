@@ -4,7 +4,7 @@ USF Tampa campus issue reporting with Gemini-assisted interpretation, hybrid rou
 
 ## Current status
 
-This repository currently contains the **shared foundation**, not the finished application:
+The Gmail feature branch adds separate mailbox consent, approved test email with an optional photo, and manual reply checks to the shared foundation:
 
 - Flask app factory, health endpoint and CSRF support.
 - Shared typed contracts in `schemas.py`.
@@ -12,7 +12,7 @@ This repository currently contains the **shared foundation**, not the finished a
 - Private validated photo storage.
 - Foundation tests.
 
-The Google sign-in routes are ready for local OAuth configuration. Gmail sending and replies, Gemini analysis and research, department routing, and the student interface are pending. `/health` reports the foundation stage. Use a controlled inbox for email tests.
+Gmail endpoints are covered by local tests using simulated provider responses. Live Google verification needs an OAuth client and test accounts. Report delivery also needs Hanif's verified routing module. The student interface is being built on Sasi's branch. `/health` reports the foundation stage.
 
 ## First-time setup
 
@@ -30,9 +30,19 @@ Open http://localhost:5000/health. The root URL currently returns foundation inf
 
 On macOS/Linux use `.venv/bin/python` in place of `.\.venv\Scripts\python.exe`.
 
-`tools/init_local.py` creates a private `.env` with a random session secret and preserves an existing `.env`. Never commit that file. API credentials are not required for the foundation tests or health endpoint. Integration owners will configure them privately later.
+`tools/init_local.py` creates a private `.env` with a random session secret and preserves an existing `.env`. Never commit that file. The local test suite and health endpoint run without Google credentials.
 
 To test Google sign-in, configure a Google OAuth web client with the exact redirect URI `http://localhost:5000/auth/google/callback`. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `ALLOWED_GOOGLE_EMAILS` in `.env`. The last value is a comma-separated list of test account addresses. Restart the app and visit `http://localhost:5000/auth/google/start` using the same `localhost` origin as the callback. This requests identity and email scopes only. On success, the signed-in user's local ID is available as `session["user_id"]`. Use `POST /logout` with the session's CSRF token to sign out.
+
+## Gmail test setup
+
+1. Enable the Gmail API for the same Google Cloud project. Add the personal Google account that will send the report to the project's OAuth test users and to `ALLOWED_GOOGLE_EMAILS` locally.
+2. Add `http://localhost:5000/gmail/callback` as a second redirect URI on the same OAuth web client. Use `localhost` for the whole flow.
+3. Generate a private `GMAIL_TOKEN_KEY` with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Save it in your local `.env`. Use the project's virtual environment Python.
+4. Set `TEST_RECIPIENT` to a single inbox the team controls. The preview shows the exact address and the app only delivers there in TEST mode.
+5. Restart Flask. Sign in, connect Gmail with the same account, review one test report, and send it when the verified routing module is present. Reply from the test inbox to the original message and use **Check for replies**. The app records the reply separately from any repair outcome.
+
+If Gmail's send result is uncertain, inspect the sender's Sent folder using the reviewed subject. Keep that report locked while verifying delivery to avoid a duplicate. Disconnect removes the stored connection from Fix It Bulls. Google account settings manage the permission grant itself.
 
 SQLite and photos are created under ignored `instance/`. Each developer uses separate runtime data. Git transfers source code, not the team's live database. The integrated demo will run on one primary instance.
 

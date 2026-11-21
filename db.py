@@ -51,6 +51,33 @@ def init_db():
             updated_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS reports_owner ON reports(user_id);
+        CREATE TABLE IF NOT EXISTS gmail_connections (
+            user_id TEXT PRIMARY KEY REFERENCES users(id),
+            encrypted_refresh_token BLOB NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS gmail_reviews (
+            report_id TEXT PRIMARY KEY REFERENCES reports(id) ON DELETE CASCADE,
+            id TEXT NOT NULL UNIQUE,
+            version INTEGER NOT NULL,
+            snapshot_json TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS gmail_attempts (
+            id TEXT PRIMARY KEY,
+            report_id TEXT NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+            snapshot_json TEXT NOT NULL,
+            state TEXT NOT NULL,
+            message_id TEXT,
+            thread_id TEXT,
+            sent_at TEXT,
+            error_code TEXT,
+            rfc_message_id TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS gmail_reply_refs (
+            attempt_id TEXT NOT NULL REFERENCES gmail_attempts(id) ON DELETE CASCADE,
+            message_id TEXT NOT NULL,
+            received_at TEXT NOT NULL,
+            PRIMARY KEY (attempt_id, message_id)
+        );
     """)
 
 
